@@ -1,0 +1,22 @@
+# Core JAX dependencies with CUDA support
+# Note: For CUDA support, use the appropriate jax version for your CUDA version
+# For CUDA 12: jax[cuda12]>=0.4.20
+# For CUDA 11: jax[cuda11_pip]>=0.4.20
+# For CPU only: jax (default)
+# Using CPU version for testing, but production should use CUDA
+jax[cpu]>=0.4.20
+flax>=0.7.5
+optax>=0.1.7
+
+# Machine learning utilities
+ml-collections>=0.1.1
+
+# Data loading
+datasets>=2.14.0
+Pillow>=10.0.0
+
+# Progress and logging
+tqdm>=4.65.0
+
+# Development dependencies (optional)
+pytest>=7.4.0
