@@ -1,0 +1,18 @@
+trials: 12
+budget_epochs: 10
+output_dir: outputs/sweeps/medseg_task01_hyperparam_sweep
+base_config: configs/medseg_task01.json
+param_space:
+  training.learning_rate:
+    kind: log_uniform
+    min: 1e-5
+    max: 1e-3
+  training.batch_size:
+    kind: choice
+    values: [1, 2, 4]
+  training.loss:
+    kind: choice
+    values: ["bce_dice", "dice", "bce"]
+  model.embed_dim:
+    kind: choice
+    values: [64, 96]

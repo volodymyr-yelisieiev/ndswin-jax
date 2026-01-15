@@ -1,0 +1,39 @@
+{
+  "name": "modelnet40",
+  "description": "ModelNet40 3D point cloud classification (40 classes, 32^3 voxels)",
+  "model": {
+    "num_dims": 3,
+    "patch_size": [4, 4, 4],
+    "embed_dim": 48,
+    "depths": [2, 2, 6, 2],
+    "num_heads": [3, 6, 12, 24],
+    "window_size": [4, 4, 4],
+    "in_channels": 1,
+    "num_classes": 40,
+    "drop_rate": 0.1,
+    "drop_path_rate": 0.2
+  },
+  "training": {
+    "epochs": 100,
+    "batch_size": 16,
+    "learning_rate": 5e-4,
+    "loss": "cross_entropy",
+    "weight_decay": 0.05,
+    "label_smoothing": 0.1,
+    "stochastic_depth_rate": 0.1,
+    "warmup_epochs": 10,
+    "gradient_clip_norm": 1.0,
+    "early_stopping": true,
+    "patience": 15,
+    "min_delta": 0.001
+  },
+  "data": {
+    "dataset": "volume_folder",
+    "data_dir": "data/modelnet10",
+    "image_size": [32, 32, 32],
+    "in_channels": 1,
+    "task": "classification",
+    "download": false,
+    "random_flip": true
+  }
+}

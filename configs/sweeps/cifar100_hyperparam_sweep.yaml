@@ -1,0 +1,32 @@
+trials: 20
+budget_epochs: 25
+output_dir: outputs/sweeps/cifar100_hyperparam_sweep
+base_config: configs/cifar100.json
+
+param_space:
+  training.learning_rate:
+    kind: log_uniform
+    min: 1e-4
+    max: 5e-3
+  training.batch_size:
+    kind: choice
+    values: [64, 128, 256]
+  model.embed_dim:
+    kind: choice
+    values: [24, 48, 72, 96]
+  model.drop_rate:
+    kind: choice
+    values: [0.0, 0.1, 0.2, 0.3]
+  model.drop_path_rate:
+    kind: choice
+    values: [0.1, 0.2, 0.3, 0.4]
+  training.weight_decay:
+    kind: log_uniform
+    min: 0.01
+    max: 0.1
+  training.label_smoothing:
+    kind: choice
+    values: [0.0, 0.1, 0.2]
+  training.warmup_epochs:
+    kind: choice
+    values: [2, 5, 10]

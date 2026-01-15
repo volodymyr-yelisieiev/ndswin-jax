@@ -1,0 +1,15 @@
+# Sequential queue: 2D sweep+train, then 3D sweep+train
+jobs:
+  - name: cifar100_auto_sweep
+    type: auto-sweep
+    sweep: configs/sweeps/cifar100_hyperparam_sweep.yaml
+    trials: 20
+    train_epochs: 100
+    retries: 1
+
+  - name: modelnet10_auto_sweep
+    type: auto-sweep
+    sweep: configs/sweeps/modelnet10_hyperparam_sweep.yaml
+    trials: 12
+    train_epochs: 100
+    retries: 1
