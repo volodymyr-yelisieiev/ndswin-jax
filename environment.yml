@@ -1,0 +1,12 @@
+name: ndswin-jax
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - nvidia-cuda-nvcc-cu12
+  # Minimal environment for HF datasets and JAX
+  - pip:
+    - -e .
+

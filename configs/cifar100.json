@@ -1,0 +1,29 @@
+{
+  "name": "cifar100_hf",
+  "description": "CIFAR-100 via Hugging Face datasets",
+  "model": {
+    "num_dims": 2,
+    "patch_size": [4, 4],
+    "embed_dim": 96,
+    "depths": [2, 2, 6, 2],
+    "num_heads": [3, 6, 12, 24],
+    "window_size": [7, 7],
+    "in_channels": 3,
+    "num_classes": 100
+  },
+  "training": {
+    "epochs": 100,
+    "batch_size": 128,
+    "learning_rate": 1e-3,
+    "loss": "cross_entropy"
+  },
+  "data": {
+    "dataset": "hf:cifar100",
+    "hf_id": "cifar100",
+    "data_dir": "data/cifar100",
+    "image_size": [3, 32, 32],
+    "in_channels": 3,
+    "task": "classification",
+    "download": true
+  }
+}
