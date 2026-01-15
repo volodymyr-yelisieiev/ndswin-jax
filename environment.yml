@@ -1,0 +1,11 @@
+name: ndswin-jax
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - nvidia-cuda-nvcc-cu12
+  # All dependencies are managed via pyproject.toml
+  # To install, run: pip install -e ".[all]"
+  # For GPU support, also run: pip install "jax[cuda12_pip]==0.7.1" jax-cuda12-plugin==0.7.1 jax-cuda12-pjrt==0.7.1

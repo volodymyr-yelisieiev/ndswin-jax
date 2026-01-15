@@ -1,0 +1,63 @@
+{
+    "name": "cifar100",
+    "description": "CIFAR-100 training with stronger augmentation and regularization (renamed from cifar100_improved)",
+    
+    "dataset": {
+        "name": "cifar100",
+        "data_dir": "data",
+        "download": true,
+        "num_classes": 100,
+        "input_shape": [3, 32, 32],
+        "mean": [0.5071, 0.4867, 0.4408],
+        "std": [0.2675, 0.2565, 0.2761]
+    },
+    
+    "model": {
+        "num_dims": 2,
+        "patch_size": [4, 4],
+        "window_size": [4, 4],
+        "in_channels": 3,
+        "embed_dim": 96,
+        "depths": [2, 2, 6, 2],
+        "num_heads": [3, 6, 12, 24],
+        "mlp_ratio": 4.0,
+        "drop_path_rate": 0.2,
+        "drop_rate": 0.0,
+        "attn_drop_rate": 0.0
+    },
+    
+    "training": {
+        "epochs": 300,
+        "batch_size": 128,
+        "learning_rate": 1e-3,
+        "min_learning_rate": 1e-6,
+        "weight_decay": 0.1,
+        "optimizer": "adamw",
+        "lr_schedule": "cosine",
+        "warmup_epochs": 10,
+        "label_smoothing": 0.15,
+        "gradient_clip_norm": 1.0
+    },
+    
+    "augmentation": {
+        "random_crop": true,
+        "crop_padding": 4,
+        "random_flip": true,
+        "color_jitter": true,
+        "color_jitter_strength": 0.4,
+        "mixup_alpha": 0.2,
+        "cutmix_alpha": 0.0,
+        "cutout_size": 8
+    },
+    
+    "checkpointing": {
+        "save_every": 5000,
+        "max_to_keep": 5
+    },
+    
+    "logging": {
+        "log_every": 50
+    },
+    
+    "seed": 42
+}
