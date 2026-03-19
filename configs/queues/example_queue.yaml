@@ -1,0 +1,49 @@
+# Example queue: sequential sweep → train pipeline
+#
+# This file demonstrates the general-purpose queue schema.
+# You define your own jobs — nothing is hardcoded. Each job is
+# independent and can target any dataset or dimensionality.
+#
+# Job types:
+#   auto-sweep  — sweep hyperparameters, then train with the best config
+#   sweep       — sweep hyperparameters only (no final training)
+#   train       — train with a fixed config
+#
+# Usage:
+#   make queue QUEUE_FILE=configs/queues/example_queue.yaml
+#   make queue-tmux QUEUE_FILE=configs/queues/example_queue.yaml
+#
+# Filter to specific jobs:
+#   python train/queue_runner.py --queue configs/queues/example_queue.yaml --jobs my_2d_sweep
+#
+# Resume after interruption (skip already-completed jobs):
+#   python train/queue_runner.py --queue configs/queues/example_queue.yaml --skip-completed
+
+jobs:
+  # Example 1: 2D image classification sweep + train
+  - name: cifar10_sweep_and_train
+    type: auto-sweep
+    sweep: configs/sweeps/cifar10_hyperparam_sweep.yaml
+    trials: 20
+    train_epochs: 100
+    retries: 1
+
+  # Example 2: 3D voxel classification sweep + train
+  - name: modelnet10_sweep_and_train
+    type: auto-sweep
+    sweep: configs/sweeps/modelnet10_hyperparam_sweep.yaml
+    trials: 12
+    train_epochs: 100
+    retries: 1
+
+  # Example 3: standalone training with a fixed config
+  # - name: quick_train
+  #   type: train
+  #   config: configs/cifar10.json
+  #   epochs: 50
+
+  # Example 4: sweep-only (no final training)
+  # - name: exploration_sweep
+  #   type: sweep
+  #   sweep: configs/sweeps/my_custom_sweep.yaml
+  #   trials: 30

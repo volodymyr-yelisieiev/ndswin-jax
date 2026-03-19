@@ -1,0 +1,41 @@
+trials: 20
+trialsmethod: random
+metric: val_top5_accuracy
+budget_epochs: 10
+max_steps_per_epoch: 150
+output_dir: outputs/sweeps/cifar10_hyperparam_sweep
+base_config: configs/cifar10.json
+
+param_space:
+  training.learning_rate:
+    kind: log_uniform
+    min: 5e-5
+    max: 5e-3
+  training.batch_size:
+    kind: choice
+    values: [256, 512]
+  model.embed_dim:
+    kind: choice
+    values: [48, 72]
+  model.drop_rate:
+    kind: choice
+    values: [0.0, 0.1, 0.2]
+  model.drop_path_rate:
+    kind: choice
+    values: [0.1, 0.2, 0.3, 0.4]
+  training.weight_decay:
+    kind: log_uniform
+    min: 0.01
+    max: 0.1
+  training.label_smoothing:
+    kind: choice
+    values: [0.05, 0.1, 0.15]
+  training.warmup_epochs:
+    kind: choice
+    values: [10, 20, 30]
+  data.mixup_alpha:
+    kind: choice
+    values: [0.0, 0.5, 0.8, 1.0]
+  data.cutmix_alpha:
+    kind: choice
+    values: [0.0, 0.5, 1.0]
