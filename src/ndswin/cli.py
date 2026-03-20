@@ -219,13 +219,24 @@ def setup_output_dirs(
     return checkpoint_dir, log_file
 
 
-def run_train_command(args: argparse.Namespace) -> int:
+def load_training_runtime():
+    """Import training runtime dependencies lazily.
+
+    This keeps GPU selection logic ahead of any JAX-backed imports so
+    ``setup_optimal_gpus`` can still influence backend discovery.
+    """
     from .models.classifier import SwinForSegmentation
     from .models.swin import NDSwinTransformer
     from .training import Trainer, create_data_loader
+
+    return SwinForSegmentation, NDSwinTransformer, Trainer, create_data_loader
+
+
+def run_train_command(args: argparse.Namespace) -> int:
     from .utils.gpu import setup_optimal_gpus
 
     setup_optimal_gpus()
+    SwinForSegmentation, NDSwinTransformer, Trainer, create_data_loader = load_training_runtime()
 
     import jax
     import jax.numpy as jnp

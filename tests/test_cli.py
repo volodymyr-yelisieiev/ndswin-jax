@@ -7,6 +7,9 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 
 def cli_env() -> dict[str, str]:
@@ -91,3 +94,38 @@ def test_cli_queue_dry_run_smoke(tmp_path: Path):
     assert result.returncode == 0
     assert "QUEUE RUNNER" in result.stdout
     assert "dry_train" in result.stdout
+
+
+def test_run_train_command_sets_up_gpus_before_loading_training_runtime(monkeypatch):
+    import ndswin.cli as cli
+
+    calls: list[str] = []
+
+    def fake_setup_optimal_gpus():
+        calls.append("gpu_setup")
+
+    def fake_load_training_runtime():
+        calls.append("load_runtime")
+        raise RuntimeError("stop_after_order_check")
+
+    monkeypatch.setattr("ndswin.utils.gpu.setup_optimal_gpus", fake_setup_optimal_gpus)
+    monkeypatch.setattr(cli, "load_training_runtime", fake_load_training_runtime)
+
+    args = SimpleNamespace(
+        config="configs/cifar10.json",
+        epochs=None,
+        batch_size=None,
+        lr=None,
+        seed=None,
+        data_dir=None,
+        max_steps_per_epoch=None,
+        stamp=None,
+        no_log_file=True,
+        log_level="INFO",
+        overrides=[],
+    )
+
+    with pytest.raises(RuntimeError, match="stop_after_order_check"):
+        cli.run_train_command(args)
+
+    assert calls == ["gpu_setup", "load_runtime"]

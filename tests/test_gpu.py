@@ -4,8 +4,6 @@ import os
 import subprocess
 import unittest.mock as mock
 
-import pytest
-
 from ndswin.utils.gpu import get_available_gpus, setup_optimal_gpus
 
 
@@ -16,14 +14,14 @@ def test_get_available_gpus_success(mock_check_output):
         b"",  # which nvidia-smi check
         "0, 15000, 10\n1, 2000, 90\n2, [Not Supported], 40\n3, 8000, 45\n"
     ]
-    
+
     # Needs 4MB free, under 50%
     gpus = get_available_gpus(min_free_mb=4000, max_utilization=50)
-    
+
     # GPU 0 has 15000 > 4000, util 10% < 50% -> YES
     # GPU 1 has 2000 < 4000 -> NO
     # GPU 2 has "[Not Supported]" free -> errors out silently -> NO
-    # But wait, GPU 2 says it's free. If it is int parsing error it skips. 
+    # But wait, GPU 2 says it's free. If it is int parsing error it skips.
     # Actually wait: format is "index, free, util" -> "2, [Not Supported], 40" -> ValueError on float('[Not Supported]')
     # Let's see GPU 3: 8000 > 4000, util 45% < 50% -> YES
     assert gpus == [0, 3]
@@ -64,10 +62,12 @@ def test_get_available_gpus_unexpected_error(mock_warn, mock_check_output):
 
 
 @mock.patch("ndswin.utils.gpu.get_available_gpus", return_value=[1, 2])
-def test_setup_optimal_gpus_binds(mock_get, monkeypatch):
+def test_setup_optimal_gpus_binds(mock_get, monkeypatch, caplog):
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
-    setup_optimal_gpus()
+    with caplog.at_level("INFO", logger="ndswin.gpu"):
+        setup_optimal_gpus()
     assert os.environ["CUDA_VISIBLE_DEVICES"] == "1,2"
+    assert "Bound CUDA_VISIBLE_DEVICES to available GPUs" in caplog.text
 
 
 @mock.patch("ndswin.utils.gpu.get_available_gpus", return_value=[])
@@ -82,4 +82,3 @@ def test_setup_optimal_gpus_respects_existing(mock_get, monkeypatch):
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3")
     setup_optimal_gpus()
     assert os.environ["CUDA_VISIBLE_DEVICES"] == "3"
-

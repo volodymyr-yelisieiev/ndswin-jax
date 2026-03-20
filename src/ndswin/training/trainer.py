@@ -12,18 +12,25 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from flax.training import train_state
-from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
+from jax.sharding import Mesh, NamedSharding
+from jax.sharding import PartitionSpec as P
 
 from ndswin.config import TrainingConfig
 from ndswin.training.checkpoint import CheckpointManager
 from ndswin.training.losses import (
+    binary_cross_entropy_with_logits,
     cross_entropy_loss,
     dice_loss,
-    binary_cross_entropy_with_logits,
 )
-from ndswin.training.metrics import MetricTracker, accuracy, top_k_accuracy, compute_segmentation_metrics
+from ndswin.training.metrics import (
+    MetricTracker,
+    accuracy,
+    compute_segmentation_metrics,
+    top_k_accuracy,
+)
 from ndswin.training.optimizer import create_optimizer
 from ndswin.types import Array, Batch, PRNGKey
+from ndswin.utils.logging import get_logger
 
 
 class TrainState(train_state.TrainState):
@@ -313,10 +320,11 @@ class Trainer:
         self.state: TrainState | None = None
         self.step = 0
         self.epoch = 0
+        self.logger = get_logger("ndswin.training")
 
         # Setup Mesh and Sharding for distributed training
         self.num_devices = len(jax.devices())
-        print(f"Using {self.num_devices} GPU(s) for data-parallel training")
+        self.logger.info("Using %d device(s) for data-parallel training", self.num_devices)
         # We shard over 'batch' dimension using all available local devices
         self.mesh = Mesh(jax.devices(), axis_names=('batch',))
         # Replicated sharding for weights/state
@@ -363,7 +371,7 @@ class Trainer:
             num_steps,
             num_train_samples,
         )
-        
+
         # Replicate state to all devices
         self.state = jax.device_put(state, self.replicated_sharding)
 
@@ -398,11 +406,11 @@ class Trainer:
             if self.mixup_transform is not None:
                 # Use a subkey for mixup so dropout RNG is independent
                 step_rng, mix_key = jax.random.split(step_rng)
-                
+
                 # JIT the mixup transform if it hasn't been
                 if not hasattr(self, "_jitted_mixup"):
                     self._jitted_mixup = jax.jit(self.mixup_transform)
-                
+
                 mixed_x, mixed_y = self._jitted_mixup(batch["image"], batch["label"], mix_key)
                 batch = {"image": mixed_x, "label": mixed_y}
 
@@ -432,7 +440,7 @@ class Trainer:
             # Logging
             if self.step % self.log_every == 0:
                 _ = tracker.compute()
-                print(f"Step {self.step}: {tracker}")
+                self.logger.info("Step %d: %s", self.step, tracker)
 
             # Checkpointing
             if self.checkpoint_dir is not None and self.step % self.checkpoint_every == 0:
@@ -489,7 +497,6 @@ class Trainer:
 
         Returns the (possibly padded) batch and the real (unpadded) batch size.
         """
-        import numpy as np
         real_bs = batch["image"].shape[0]
         if real_bs % self.num_devices != 0:
             pad_to = ((real_bs // self.num_devices) + 1) * self.num_devices
@@ -541,7 +548,7 @@ class Trainer:
         best_val_metric = -float('inf')
         epochs_without_improvement = 0
 
-        print(f"Starting training for {num_epochs} epochs")
+        self.logger.info("Starting training for %d epochs", num_epochs)
         start_time = time.time()
 
         for epoch in range(num_epochs):
@@ -549,18 +556,18 @@ class Trainer:
 
             # Train epoch
             train_metrics = self.train_epoch(train_loader, num_steps=max_steps_per_epoch)
-            
+
             # Update history with train metrics
             for k, v in train_metrics.items():
                 hist_key = k if k.startswith("train_") else f"train_{k}"
                 if hist_key not in history:
                     history[hist_key] = []
                 history[hist_key].append(v)
-            
+
             # Evaluate
             if val_loader is not None:
                 val_metrics = self.evaluate(val_loader)
-                
+
                 # Update history with val metrics
                 for k, v in val_metrics.items():
                     hist_key = k if k.startswith("val_") else f"val_{k}"
@@ -571,7 +578,7 @@ class Trainer:
                 # Robust printing
                 train_loss = train_metrics.get("loss", 0.0)
                 val_loss = val_metrics.get("loss", 0.0)
-                
+
                 # Get some representative metric for printing
                 if self.task == "segmentation":
                     t_m = train_metrics.get("dice", train_metrics.get("train_dice", 0.0))
@@ -582,18 +589,25 @@ class Trainer:
                     v_m = val_metrics.get("accuracy", val_metrics.get("val_accuracy", 0.0))
                     m_name = "Acc"
 
-                print(
-                    f"Epoch {epoch + 1}/{num_epochs} - "
-                    f"Loss: {train_loss:.4f}/{val_loss:.4f}, "
-                    f"{m_name}: {t_m:.4f}/{v_m:.4f}, "
-                    f"Time: {time.time() - epoch_start:.2f}s"
+                self.logger.info(
+                    "Epoch %d/%d - Loss: %.4f/%.4f, %s: %.4f/%.4f, Time: %.2fs",
+                    epoch + 1,
+                    num_epochs,
+                    train_loss,
+                    val_loss,
+                    m_name,
+                    t_m,
+                    v_m,
+                    time.time() - epoch_start,
                 )
             else:
                 train_loss = train_metrics.get("loss", 0.0)
-                print(
-                    f"Epoch {epoch + 1}/{num_epochs} - "
-                    f"Train Loss: {train_loss:.4f}, "
-                    f"Time: {time.time() - epoch_start:.2f}s"
+                self.logger.info(
+                    "Epoch %d/%d - Train Loss: %.4f, Time: %.2fs",
+                    epoch + 1,
+                    num_epochs,
+                    train_loss,
+                    time.time() - epoch_start,
                 )
 
             # Write to tensorboard
@@ -629,11 +643,16 @@ class Trainer:
                 else:
                     epochs_without_improvement += 1
                 if epochs_without_improvement >= patience:
-                    print(f"Early stopping at epoch {epoch + 1}: no improvement for {patience} epochs (best={best_val_metric:.4f})")
+                    self.logger.info(
+                        "Early stopping at epoch %d: no improvement for %d epochs (best=%.4f)",
+                        epoch + 1,
+                        patience,
+                        best_val_metric,
+                    )
                     break
 
         total_time = time.time() - start_time
-        print(f"Training completed in {total_time:.2f}s")
+        self.logger.info("Training completed in %.2fs", total_time)
 
         return history
 
