@@ -14,6 +14,26 @@ DATASET_DIR   ?= data/$(subst /,_,$(HF_DATASET))
 FETCH_LIMIT   ?=
 TRIAL_TIMEOUT ?= 7200
 
+# Toolchain resolution: prefer a project-local conda prefix when present.
+# Override with: make CONDA_PREFIX_DIR=/your/prefix
+CONDA_PREFIX_DIR ?= Environment/ndswin-jax
+CONDA_BIN_DIR    := $(if $(wildcard $(CONDA_PREFIX_DIR)/bin/python),$(CONDA_PREFIX_DIR)/bin,)
+PYTHON_BIN       := $(if $(CONDA_BIN_DIR),$(CONDA_BIN_DIR)/python,python)
+PIPG             := $(if $(CONDA_BIN_DIR),$(CONDA_BIN_DIR)/pip,pip)
+PYTEST_BIN       := $(if $(CONDA_BIN_DIR),$(CONDA_BIN_DIR)/pytest,pytest)
+RUFF_BIN         := $(if $(CONDA_BIN_DIR),$(CONDA_BIN_DIR)/ruff,ruff)
+MYPY_BIN         := $(if $(CONDA_BIN_DIR),$(CONDA_BIN_DIR)/mypy,mypy)
+SPHINX_BIN       := $(if $(CONDA_BIN_DIR),$(CONDA_BIN_DIR)/sphinx-build,sphinx-build)
+RESOLVED_TOOLCHAIN := $(if $(CONDA_BIN_DIR),conda-prefix,system-path)
+
+# Expose the canonical names used throughout the Makefile
+PYTHON  := $(PYTHON_BIN)
+PIP     := $(PIPG)
+PYTEST  := $(PYTEST_BIN)
+RUFF    := $(RUFF_BIN)
+MYPY    := $(MYPY_BIN)
+SPHINX  := $(SPHINX_BIN)
+
 # Derived
 TRIALS_ARG    := $(if $(strip $(SWEEP_TRIALS)),--trials $(SWEEP_TRIALS),)
 LIMIT_ARG     := $(if $(strip $(FETCH_LIMIT)),--limit $(FETCH_LIMIT),)

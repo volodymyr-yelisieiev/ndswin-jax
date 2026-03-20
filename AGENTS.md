@@ -241,7 +241,7 @@ make clean-all FORCE=1
 
 ## 8. Editing Conventions for Agents
 
-### Do
+### DO
 
 - Verify claims from code before adding them to docs.
 - Keep changes minimal and scoped.
@@ -250,7 +250,7 @@ make clean-all FORCE=1
 - Prefer extending generic code paths rather than special-casing one dataset.
 - Keep experiment paths, cache paths, and logging behavior consistent with existing patterns.
 
-### Do not
+### DO NOT
 
 - Do not hard-code CIFAR-only assumptions into reusable code.
 - Do not bypass the package CLI when changing orchestration logic.
@@ -337,9 +337,9 @@ When updating this file:
 
 If you remember only a few things, remember these:
 
-- **Use `make`, not raw project scripts.**
-- **Treat `src/ndswin/cli.py` + `Makefile` as the truth.**
+- **Use `make`, not raw project scripts.** Don't call `python train/*.py` directly.
+- **Treat `src/ndswin/cli.py` + `Makefile` as the truth.** Don't trust stale docs.
 - **Keep the project generic across N-dimensional datasets.**
-- **Do not delete experiment artifacts manually.**
+- **Don't delete experiment artifacts manually** — use `make backup` / `make clean-*`.
 - **Activate the project environment before running `make`.**
 - **Update this file when workflows change.**

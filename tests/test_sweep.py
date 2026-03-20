@@ -3,12 +3,22 @@ import os
 import shutil
 import subprocess
 import sys
-import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 yaml = pytest.importorskip("yaml")
+
+
+def cli_env() -> dict[str, str]:
+    """Return an env dict with PYTHONPATH set to include src/."""
+    env = os.environ.copy()
+    src_path = str(Path("src").resolve())
+    env["PYTHONPATH"] = (
+        src_path if not env.get("PYTHONPATH") else src_path + os.pathsep + env["PYTHONPATH"]
+    )
+    return env
 
 
 def test_run_sweep_dryrun(tmp_path):

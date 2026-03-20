@@ -75,19 +75,26 @@ def test_create_data_loader_synthetic(mock_loader):
     mock_loader.assert_called_once()
 
 
-@mock.patch("datasets.load_dataset")
-def test_create_data_loader_huggingface(mock_load_dataset):
+def test_create_data_loader_huggingface(monkeypatch):
     """Test correct fallback to HuggingFace dataset."""
+    import types as _types
+
     config = DataConfig(dataset="hf:cifar10", image_size=(3, 32, 32))
 
-    def mock_get_item(idx):
-        return {
-            "img": np.zeros((32, 32, 3), dtype=np.uint8),
-            "label": idx % 10,
-        }
+    def _mock_load_dataset(hf_id, split, data_dir=None):
+        return [
+            {
+                "img": np.zeros((32, 32, 3), dtype=np.uint8),
+                "label": i % 10,
+            }
+            for i in range(100)
+        ]
 
-    mock_dataset = [mock_get_item(i) for i in range(100)]
-    mock_load_dataset.return_value = mock_dataset
+    fake_datasets = _types.SimpleNamespace(
+        load_dataset=_mock_load_dataset,
+        get_dataset_split_names=lambda hf_id, data_dir=None: ["train"],
+    )
+    monkeypatch.setitem(sys.modules, "datasets", fake_datasets)
 
     loader_train = create_data_loader(config, batch_size=4)
 
@@ -99,18 +106,23 @@ def test_create_data_loader_huggingface(mock_load_dataset):
     assert loader_train.dataset_info.name == "cifar10"
 
 
-@mock.patch("datasets.load_dataset")
-def test_huggingface_loader_segmentation(mock_load_dataset):
+def test_huggingface_loader_segmentation(monkeypatch):
     """Test 2D segmentation logic for HF loaders."""
+    import types as _types
 
-    def mock_get_seg(idx):
+    def _mock_get_seg(idx):
         return {
             "image": np.ones((64, 64, 3), dtype=np.uint8),
             "label": np.zeros((64, 64), dtype=np.int32),
         }
 
-    mock_dataset = [mock_get_seg(i) for i in range(5)]
-    mock_load_dataset.return_value = mock_dataset
+    mock_dataset = [_mock_get_seg(i) for i in range(5)]
+
+    fake_datasets = _types.SimpleNamespace(
+        load_dataset=lambda *a, **kw: mock_dataset,
+        get_dataset_split_names=lambda hf_id, data_dir=None: ["train"],
+    )
+    monkeypatch.setitem(sys.modules, "datasets", fake_datasets)
 
     loader = HuggingFaceDataLoader(
         hf_id="some_seg_dataset", split="train", batch_size=2, image_size=(3, 64, 64)

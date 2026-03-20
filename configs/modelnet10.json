@@ -1,6 +1,6 @@
 {
   "name": "modelnet10",
-  "description": "ModelNet10 3D point cloud classification (10 classes, 32^3 voxels)",
+  "description": "ModelNet10 3D voxel classification (10 classes, 32^3 voxels)",
   "model": {
     "num_dims": 3,
     "patch_size": [2, 2, 2],
@@ -17,37 +17,27 @@
     "epochs": 200,
     "batch_size": 16,
     "learning_rate": 5e-4,
-    "loss": "cross_entropy",
     "weight_decay": 0.05,
-    "label_smoothing": 0.1,
-    "stochastic_depth_rate": 0.1,
+    "optimizer": "adamw",
+    "lr_schedule": "cosine",
     "warmup_epochs": 20,
+    "label_smoothing": 0.1,
     "gradient_clip_norm": 1.0,
     "early_stopping": true,
+    "patience": 20,
+    "min_delta": 0.0001
+  },
   "data": {
     "dataset": "volume_folder",
     "data_dir": "data/modelnet10",
-    "image_size": [8, 32, 32],
+    "image_size": [32, 32, 32],
     "in_channels": 1,
     "task": "classification",
     "augmentation": true,
-    "random_crop": true,
+    "random_crop": false,
     "random_flip": true,
     "normalize": true,
     "mean": [0.5],
     "std": [0.5]
-  },
-  "training": {
-    "epochs": 100,
-    "batch_size": 64,
-    "learning_rate": 0.0001,
-    "weight_decay": 0.05,
-    "optimizer": "adamw",
-    "lr_schedule": "cosine",
-    "warmup_epochs": 10,
-    "label_smoothing": 0.1,
-    "early_stopping": true,
-    "patience": 20,
-    "min_delta": 0.0001
   }
 }
