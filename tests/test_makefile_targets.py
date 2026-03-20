@@ -1,7 +1,7 @@
 """Tests for new Makefile targets and basic project structure."""
 
+import os
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -31,3 +31,48 @@ def test_agents_md_exists():
     assert "make optimize" in content.lower() or "make optimize" in content
     assert "DON'T" in content or "DON\\'T" in content or "don't" in content.lower()
     assert "DO" in content
+
+
+def test_makefile_resolves_project_local_conda_prefix(tmp_path):
+    """Verify Makefile prefers CONDA_PREFIX_DIR/bin tools when present."""
+    prefix_dir = tmp_path / "Environment" / "ndswin-jax"
+    bin_dir = prefix_dir / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "python").write_text("#!/bin/sh\nexit 0\n")
+
+    env = os.environ.copy()
+    env["PATH"] = f"{tmp_path}:{env['PATH']}"
+    result = subprocess.run(
+        ["make", "print-env-resolution", f"CONDA_PREFIX_DIR={prefix_dir}"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    stdout = result.stdout
+    assert "resolver=conda-prefix" in stdout
+    assert f"conda_prefix_dir={prefix_dir}" in stdout
+    assert f"python_bin={bin_dir / 'python'}" in stdout
+    assert f"pip={bin_dir / 'pip'}" in stdout
+    assert f"pytest={bin_dir / 'pytest'}" in stdout
+    assert f"ruff={bin_dir / 'ruff'}" in stdout
+
+
+def test_makefile_falls_back_to_path_without_conda_prefix():
+    """Verify Makefile falls back to PATH tools when no prefix python exists."""
+    result = subprocess.run(
+        ["make", "print-env-resolution", "CONDA_PREFIX_DIR=missing-prefix"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    stdout = result.stdout
+    assert "resolver=system-path" in stdout
+    assert "python_bin=python" in stdout
+    assert "pip=pip" in stdout
+    assert "pytest=pytest" in stdout
+    assert "ruff=ruff" in stdout

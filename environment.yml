@@ -1,3 +1,6 @@
+# Official setup:
+#   conda env create --prefix ./Environment/ndswin-jax -f environment.yml
+#   conda activate ./Environment/ndswin-jax
 name: ndswin-jax
 channels:
   - conda-forge
@@ -9,4 +12,3 @@ dependencies:
   # Minimal environment for HF datasets and JAX
   - pip:
     - -e .
-

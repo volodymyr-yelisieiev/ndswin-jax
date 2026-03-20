@@ -26,13 +26,15 @@ A pure JAX/Flax implementation of the Swin Transformer, generalized to support *
 git clone https://github.com/your-org/ndswin-jax.git
 cd ndswin-jax
 
-# Option A: Conda (recommended for GPU)
-conda env create -f environment.yml
-conda activate ndswin-jax
+# Official workflow: project-local Conda prefix (recommended for GPU and Makefile integration)
+conda env create --prefix ./Environment/ndswin-jax -f environment.yml
+conda activate ./Environment/ndswin-jax
 
-# Option B: pip
-pip install -e ".[dev,gpu]"
+# If you keep the prefix somewhere else, point Make at it explicitly:
+make validate CONDA_PREFIX_DIR=/absolute/path/to/your/env
 ```
+
+The Makefile resolves `python`, `pip`, `pytest`, `ruff`, `mypy`, and `sphinx-build` from `Environment/ndswin-jax/bin` first, then falls back to the active shell `PATH` when that prefix is absent.
 
 ### 2. Autonomous Optimization Pipeline (The Holy Grail)
 
@@ -159,6 +161,21 @@ All targets accept configurable overrides:
 | `clean-all` | Clean everything | — |
 | `status` | Show running tmux sessions | — |
 | `list-configs` | List all configs | — |
+
+### Environment resolution
+
+The repository standardizes on a project-local Conda prefix:
+
+```bash
+conda env create --prefix ./Environment/ndswin-jax -f environment.yml
+conda activate ./Environment/ndswin-jax
+```
+
+By default, `make` resolves tools from `CONDA_PREFIX_DIR=Environment/ndswin-jax`. Override that variable only if you intentionally store the environment in another prefix:
+
+```bash
+make train CONFIG=configs/cifar10.json CONDA_PREFIX_DIR=/opt/conda/envs/ndswin-jax
+```
 
 ### Examples
 

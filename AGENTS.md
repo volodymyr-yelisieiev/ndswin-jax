@@ -6,6 +6,17 @@
 
 **Always use `make` commands. Never run Python scripts directly.**
 
+## Official Environment Workflow
+
+Use a **project-local Conda prefix** as the canonical environment layout:
+
+```bash
+conda env create --prefix ./Environment/ndswin-jax -f environment.yml
+conda activate ./Environment/ndswin-jax
+```
+
+The Makefile resolves `python`, `pip`, `pytest`, `ruff`, `mypy`, and `sphinx-build` from `CONDA_PREFIX_DIR` and defaults that variable to `Environment/ndswin-jax`. Override `CONDA_PREFIX_DIR=/other/prefix` only when you intentionally keep the environment elsewhere.
+
 ## Recommended Workflow
 
 ```bash
