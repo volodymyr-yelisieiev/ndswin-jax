@@ -15,8 +15,9 @@ FETCH_LIMIT   ?=
 TRIAL_TIMEOUT ?= 7200
 
 # Toolchain resolution: prefer a project-local conda prefix when present.
+# We check both the documented 'Environment/' and common 'envs/' patterns.
 # Override with: make CONDA_PREFIX_DIR=/your/prefix
-CONDA_PREFIX_DIR ?= Environment/ndswin-jax
+CONDA_PREFIX_DIR ?= $(firstword $(wildcard Environment/ndswin-jax envs/ndswin-jax))
 CONDA_BIN_DIR    := $(if $(wildcard $(CONDA_PREFIX_DIR)/bin/python),$(CONDA_PREFIX_DIR)/bin,)
 PYTHON_BIN       := $(if $(CONDA_BIN_DIR),$(CONDA_BIN_DIR)/python,python)
 PIPG             := $(if $(CONDA_BIN_DIR),$(CONDA_BIN_DIR)/pip,pip)

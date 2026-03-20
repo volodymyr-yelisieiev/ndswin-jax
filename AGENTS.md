@@ -90,7 +90,7 @@ These points reflect the repository as it exists now:
 
 ### Important nuance about the environment
 
-The repository documents a **project-local Conda prefix** at `Environment/ndswin-jax`, and that remains the recommended layout.
+The repository documents a **project-local Conda prefix** at `Environment/ndswin-jax` (or `envs/ndswin-jax`), and that remains the recommended layout.
 
 However, when reasoning about actual behavior, note this distinction:
 
@@ -99,6 +99,7 @@ However, when reasoning about actual behavior, note this distinction:
   conda env create --prefix ./Environment/ndswin-jax -f environment.yml
   conda activate ./Environment/ndswin-jax
   ```
+  (Note: Many users prefer `./envs/ndswin-jax` as the prefix.)
 - The **current Makefile behavior** assumes the required executables (`python`, `pytest`, `ruff`, etc.) are already available when `make` runs.
 
 So in practice, agents should **activate the environment first** and then use `make`. Do not claim the Makefile fully bootstraps tool resolution for an inactive environment unless you verify that code path exists.
