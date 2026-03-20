@@ -6,34 +6,63 @@ arbitrary dimensions (2D, 3D, 4D, and beyond).
 
 from typing import Any
 
-from ndswin.config import DataConfig as DataConfig
-from ndswin.config import ExperimentConfig as ExperimentConfig
-from ndswin.config import NDSwinConfig as NDSwinConfig
-from ndswin.config import TrainingConfig as TrainingConfig
-from ndswin.models.classifier import SwinClassifier as SwinClassifier
-from ndswin.models.classifier import SwinForSegmentation as SwinForSegmentation
-from ndswin.models.swin import NDSwinTransformer as NDSwinTransformer
-from ndswin.types import Array as Array
-from ndswin.types import PRNGKey as PRNGKey
-from ndswin.types import Shape as Shape
 
-
-# Lazy imports for optional heavy modules
+# Lazy imports for optional and/or heavy modules.
 def __getattr__(name: str) -> Any:
-    """Lazy import of submodules."""
+    """Lazily resolve public package attributes."""
+    if name == "NDSwinConfig":
+        from ndswin.config import NDSwinConfig
+
+        return NDSwinConfig
+    if name == "TrainingConfig":
+        from ndswin.config import TrainingConfig
+
+        return TrainingConfig
+    if name == "DataConfig":
+        from ndswin.config import DataConfig
+
+        return DataConfig
+    if name == "ExperimentConfig":
+        from ndswin.config import ExperimentConfig
+
+        return ExperimentConfig
+    if name == "NDSwinTransformer":
+        from ndswin.models.swin import NDSwinTransformer
+
+        return NDSwinTransformer
+    if name == "SwinClassifier":
+        from ndswin.models.classifier import SwinClassifier
+
+        return SwinClassifier
+    if name == "SwinForSegmentation":
+        from ndswin.models.classifier import SwinForSegmentation
+
+        return SwinForSegmentation
+    if name == "Array":
+        from ndswin.types import Array
+
+        return Array
+    if name == "PRNGKey":
+        from ndswin.types import PRNGKey
+
+        return PRNGKey
+    if name == "Shape":
+        from ndswin.types import Shape
+
+        return Shape
     if name == "training":
         from ndswin import training
 
         return training
-    elif name == "inference":
+    if name == "inference":
         from ndswin import inference
 
         return inference
-    elif name == "core":
+    if name == "core":
         from ndswin import core
 
         return core
-    elif name == "utils":
+    if name == "utils":
         from ndswin import utils
 
         return utils
@@ -44,24 +73,19 @@ __version__ = "0.1.0"
 __author__ = "NDSwin-JAX Authors"
 
 __all__ = [
-    # Configuration
     "NDSwinConfig",
     "TrainingConfig",
     "DataConfig",
     "ExperimentConfig",
-    # Models
     "NDSwinTransformer",
     "SwinClassifier",
     "SwinForSegmentation",
-    # Types
     "Array",
     "PRNGKey",
     "Shape",
-    # Submodules
     "training",
     "inference",
     "core",
     "utils",
-    # Version
     "__version__",
 ]

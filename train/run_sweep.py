@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Small hyperparameter sweep driver (random search).
-
-Usage:
-    python train/run_sweep.py --sweep configs/sweeps/cifar10_hyperparam_sweep.yaml
-
-This script samples hyperparameters, materializes per-trial ExperimentConfigs, and
-runs short-budget training to evaluate each trial. It writes trial configs and
-results into an output sweep directory.
-
-Notes:
-- Designed to work with the repository's `ndswin` API (no external scheduler required).
-- Default behavior is sequential execution. Use --dry-run to only generate configs.
-"""
+"""Thin compatibility wrapper for `ndswin sweep`."""
 
 from __future__ import annotations
 

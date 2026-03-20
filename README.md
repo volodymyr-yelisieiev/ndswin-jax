@@ -46,7 +46,23 @@ make optimize CONFIG=configs/your_config.json \
               HF_DATASET=your_hf_dataset
 ```
 
-### 3. Manual Training and Sweeping
+### 3. Package CLI (`ndswin`)
+
+The repository now ships a real package CLI so every workflow is available behind a single entrypoint:
+
+```bash
+ndswin train --config configs/cifar10.json
+ndswin sweep --sweep configs/sweeps/cifar10_hyperparam_sweep.yaml --dry-run --trials 2
+ndswin auto-sweep --sweep configs/sweeps/cifar10_hyperparam_sweep.yaml --trials 5 --train-epochs 50
+ndswin queue --queue configs/queues/queue_2d_3d.yaml --dry-run
+ndswin fetch-data --hf-id cifar10 --outdir data/cifar10 --limit 100
+ndswin show-best
+ndswin validate --config configs/cifar10.json --train-epochs 2
+```
+
+The `Makefile` delegates to the same package CLI, so `make train`, `make sweep`, and `make validate` stay compatible while avoiding direct `python train/...py` entrypoints.
+
+### 4. Manual Training and Sweeping
 
 Train a model on a predefined configuration:
 
@@ -61,7 +77,7 @@ Or run a manual hyperparameter sweep:
 make sweep SWEEP=configs/sweeps/my_custom_sweep.yaml SWEEP_TRIALS=20
 ```
 
-### 4. Run the Full 2D→3D Pipeline
+### 5. Run the Full 2D→3D Pipeline
 
 ```bash
 # Fetch 3D dataset
@@ -138,6 +154,20 @@ For 3D voxel data organized as `data_dir/{split}/class_NNN/*.npz`:
 }
 ```
 
+## CLI and Makefile Reference
+
+### `ndswin` subcommands
+
+| Command | Description | Important Options |
+|---|---|---|
+| `ndswin train` | Train from a config JSON | `--config`, `--epochs`, `--batch-size`, `--lr`, `--data-dir`, `-o/--override` |
+| `ndswin sweep` | Run a random-search sweep | `--sweep`, `--base-config`, `--trials`, `--dry-run`, `--outdir` |
+| `ndswin auto-sweep` | Sweep, select best trial, then train it | `--sweep`, `--trials`, `--train-epochs`, `--outdir` |
+| `ndswin queue` | Execute train/sweep/auto-sweep jobs from a queue file | `--queue`, `--dry-run`, `--jobs`, `--retry`, `--skip-completed` |
+| `ndswin fetch-data` | Export a Hugging Face dataset into repo layout | `--hf-id`, `--outdir`, `--limit` |
+| `ndswin show-best` | Print the best available sweep result | `--summary`, `--outputs-dir` |
+| `ndswin validate` | Run tests plus a smoke training job | `--config`, `--train-epochs`, `--skip-tests`, `--skip-train`, `-o/--override` |
+
 ## Makefile Reference
 
 All targets accept configurable overrides:
@@ -187,16 +217,16 @@ ndswin-jax/
 │   ├── modelnet10.json        # 3D classification
 │   ├── sweeps/                # Hyperparameter sweep configs
 │   └── queues/                # Job queue configs
-├── src/ndswin/                # Core library
-│   ├── model.py               # NDSwin model
+├── src/ndswin/                # Core library + package CLI
+│   ├── cli.py                 # Unified package CLI (`ndswin ...`)
 │   ├── config.py              # Configuration dataclasses
 │   └── training/              # Training utilities
-├── train/                     # Training scripts
-│   ├── train.py               # Main training script
-│   ├── run_sweep.py           # Hyperparameter sweep
-│   ├── auto_sweep_and_train.py # Sweep → train pipeline
-│   ├── queue_runner.py        # Sequential job queue
-│   └── fetch_hf_dataset.py   # Dataset downloader
+├── train/                     # Thin compatibility wrappers over the package CLI
+│   ├── train.py               # Wrapper for `ndswin train`
+│   ├── run_sweep.py           # Wrapper for `ndswin sweep`
+│   ├── auto_sweep_and_train.py # Wrapper for `ndswin auto-sweep`
+│   ├── queue_runner.py        # Wrapper for `ndswin queue`
+│   └── fetch_hf_dataset.py    # Wrapper for `ndswin fetch-data`
 ├── tests/                     # Test suite
 ├── Makefile                   # All commands
 ├── pyproject.toml             # Package config

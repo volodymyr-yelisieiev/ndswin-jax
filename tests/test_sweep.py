@@ -1,5 +1,7 @@
 import json
+import os
 import shutil
+import subprocess
 import sys
 import subprocess
 from types import SimpleNamespace
@@ -11,9 +13,21 @@ yaml = pytest.importorskip("yaml")
 
 def test_run_sweep_dryrun(tmp_path):
     outdir = tmp_path / "sweep_out"
-    cmd = [sys.executable, "train/run_sweep.py", "--sweep", "configs/sweeps/cifar10_hyperparam_sweep.yaml", "--dry-run", "--trials", "2", "--outdir", str(outdir)]
+    cmd = [
+        sys.executable,
+        "-m",
+        "ndswin.cli",
+        "sweep",
+        "--sweep",
+        "configs/sweeps/cifar10_hyperparam_sweep.yaml",
+        "--dry-run",
+        "--trials",
+        "2",
+        "--outdir",
+        str(outdir),
+    ]
     # Run the script as a subprocess to avoid heavy JAX initialization
-    subprocess.check_call(cmd)
+    subprocess.check_call(cmd, env=cli_env())
 
     # Check that the summary.json exists and contains two entries
     summary = json.loads((outdir / "summary.json").read_text())
