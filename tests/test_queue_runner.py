@@ -1,17 +1,28 @@
 """Tests for the queue runner."""
 
 import json
-import sys
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 try:
     import yaml
+
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
+
+
+def cli_env() -> dict[str, str]:
+    env = os.environ.copy()
+    src_path = str(Path("src").resolve())
+    env["PYTHONPATH"] = (
+        src_path if not env.get("PYTHONPATH") else src_path + os.pathsep + env["PYTHONPATH"]
+    )
+    return env
 
 
 @pytest.fixture
@@ -109,7 +120,9 @@ def test_build_command_auto_sweep():
         "train_epochs": 50,
     }
     cmd = build_command(job, "python")
-    assert "train/auto_sweep_and_train.py" in cmd
+    assert "-m" in cmd
+    assert "ndswin.cli" in cmd
+    assert "auto-sweep" in cmd
     assert "--sweep" in cmd
     assert "--trials" in cmd
     assert "5" in cmd
@@ -128,7 +141,9 @@ def test_build_command_sweep():
         "outdir": "/tmp/sweep_out",
     }
     cmd = build_command(job, "python")
-    assert "train/run_sweep.py" in cmd
+    assert "-m" in cmd
+    assert "ndswin.cli" in cmd
+    assert "sweep" in cmd
     assert "--outdir" in cmd
 
 
@@ -138,7 +153,9 @@ def test_build_command_train():
 
     job = {"type": "train", "config": "configs/cifar10.json", "epochs": 10}
     cmd = build_command(job, "python")
-    assert "train/train.py" in cmd
+    assert "-m" in cmd
+    assert "ndswin.cli" in cmd
+    assert "train" in cmd
     assert "--config" in cmd
     assert "--epochs" in cmd
 
@@ -182,12 +199,14 @@ def test_queue_runner_dry_run(tmp_path: Path):
     # The dry-run only prints commands, doesn't execute them
     cmd = [
         sys.executable,
-        "train/queue_runner.py",
+        "-m",
+        "ndswin.cli",
+        "queue",
         "--queue",
         str(queue_path),
         "--dry-run",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, env=cli_env())
     assert result.returncode == 0
     assert "QUEUE RUNNER" in result.stdout
     assert "dry_sweep" in result.stdout
@@ -198,14 +217,22 @@ def test_load_completed_jobs(tmp_path: Path):
     from train.queue_runner import load_completed_jobs
 
     # Create some fake queue result files
-    (tmp_path / "queue_20260101_120000.json").write_text(json.dumps([
-        {"name": "job_a", "status": "completed"},
-        {"name": "job_b", "status": "failed"},
-    ]))
-    (tmp_path / "queue_20260102_120000.json").write_text(json.dumps([
-        {"name": "job_c", "status": "completed"},
-        {"name": "job_d", "status": "dry"},
-    ]))
+    (tmp_path / "queue_20260101_120000.json").write_text(
+        json.dumps(
+            [
+                {"name": "job_a", "status": "completed"},
+                {"name": "job_b", "status": "failed"},
+            ]
+        )
+    )
+    (tmp_path / "queue_20260102_120000.json").write_text(
+        json.dumps(
+            [
+                {"name": "job_c", "status": "completed"},
+                {"name": "job_d", "status": "dry"},
+            ]
+        )
+    )
 
     completed = load_completed_jobs(tmp_path)
     assert completed == {"job_a", "job_c"}

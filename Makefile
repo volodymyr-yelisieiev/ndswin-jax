@@ -20,28 +20,7 @@ LIMIT_ARG     := $(if $(strip $(FETCH_LIMIT)),--limit $(FETCH_LIMIT),)
 EXTRA_ARGS    ?=
 FORCE         ?=
 HF_ENV        := HF_HOME=.hf_cache HF_DATASETS_CACHE=.hf_cache
-CONDA_PREFIX_DIR ?= Environment/ndswin-jax
-
-# Use the project-local Conda prefix when available, otherwise fall back to PATH.
-CONDA_BIN_DIR := $(abspath $(CONDA_PREFIX_DIR))/bin
-ifneq ($(wildcard $(CONDA_BIN_DIR)/python),)
-    RESOLVED_TOOLCHAIN := conda-prefix
-    PYTHON_BIN := $(CONDA_BIN_DIR)/python
-    PIP := $(CONDA_BIN_DIR)/pip
-    RUFF := $(CONDA_BIN_DIR)/ruff
-    MYPY := $(CONDA_BIN_DIR)/mypy
-    PYTEST := $(CONDA_BIN_DIR)/pytest
-    SPHINX := $(CONDA_BIN_DIR)/sphinx-build
-else
-    RESOLVED_TOOLCHAIN := system-path
-    PYTHON_BIN := python
-    PIP := pip
-    RUFF := ruff
-    MYPY := mypy
-    PYTEST := pytest
-    SPHINX := sphinx-build
-endif
-PYTHON := $(PYTHON_BIN) -u
+NDSWIN        := PYTHONPATH=$(shell pwd)/src $(PYTHON) -m ndswin.cli
 
 # =============================================================================
 # Help
@@ -139,7 +118,7 @@ optimize:
 	@$(MAKE) fetch-data --no-print-directory 2>/dev/null || echo "  (data already available or fetch skipped)"
 	@echo ""
 	@echo "Step 2/4: Running hyperparameter sweep..."
-	$(HF_ENV) HF_HUB_OFFLINE=1 $(PYTHON) train/auto_sweep_and_train.py \
+	$(HF_ENV) HF_HUB_OFFLINE=1 $(NDSWIN) auto-sweep \
 		--sweep $(SWEEP) $(TRIALS_ARG) --train-epochs $(TRAIN_EPOCHS) $(EXTRA_ARGS)
 	@echo ""
 	@echo "Step 3/4: Showing best result..."
@@ -162,33 +141,7 @@ tensorboard:
 	$(PYTHON) -m tensorboard.main --logdir outputs/ --bind_all
 
 show-best:
-	@echo "Best results from sweep outputs:"
-	@echo ""
-	@found=0; \
-	for summary in $$(find outputs/ -name "summary.json" -type f 2>/dev/null | sort -r); do \
-		if [ $$found -eq 0 ]; then \
-			echo "  Source: $$summary"; \
-			$(PYTHON) -c "\
-import json, sys; \
-data = json.load(open('$$summary')); \
-valid = [t for t in data if t.get('status') not in ('error', 'dry')]; \
-if not valid: print('  No successful trials found.'); sys.exit(0); \
-if 'val_accuracy' in valid[0]: \
-    best = max(valid, key=lambda t: t.get('val_accuracy', 0)); \
-    print(f'  Best Trial: {best[\"trial\"]}'); \
-    print(f'  Val Accuracy: {best.get(\"val_accuracy\", 0):.4f}'); \
-    print(f'  Val Top-5: {best.get(\"val_top5_accuracy\", 0):.4f}'); \
-elif 'val_dice' in valid[0]: \
-    best = max(valid, key=lambda t: t.get('val_dice', 0)); \
-    print(f'  Best Trial: {best[\"trial\"]}'); \
-    print(f'  Val Dice: {best.get(\"val_dice\", 0):.4f}'); \
-print(f'  Config: {best.get(\"config_path\", \"N/A\")}'); \
-print(f'  Elapsed: {best.get(\"elapsed_seconds\", 0):.0f}s'); \
-" 2>/dev/null; \
-			found=1; \
-		fi; \
-	done; \
-	if [ $$found -eq 0 ]; then echo "  No sweep results found in outputs/. Run 'make optimize' first."; fi
+	$(NDSWIN) show-best
 
 stop-all:
 	@echo "Stopping all NDSwin tmux sessions..."
@@ -202,15 +155,7 @@ stop-all:
 # Validation (smoke test)
 # =============================================================================
 validate:
-	@echo "Running pipeline validation..."
-	@echo ""
-	@echo "1. Running unit tests..."
-	$(PYTEST) tests/ -v -x --tb=short -q 2>&1 | tail -5
-	@echo ""
-	@echo "2. Smoke test: 2-epoch training..."
-	$(HF_ENV) $(PYTHON) train/train.py --config $(CONFIG) --epochs 2 --no-log-file $(EXTRA_ARGS) 2>&1 | tail -10
-	@echo ""
-	@echo "✓ Pipeline validation passed."
+	$(HF_ENV) $(NDSWIN) validate --config $(CONFIG) --train-epochs 2 --no-log-file $(EXTRA_ARGS)
 
 # =============================================================================
 # Training
@@ -221,7 +166,7 @@ train:
 		echo "Available:"; ls -1 configs/*.json 2>/dev/null; exit 1; \
 	fi
 	@echo "Training with: $(CONFIG)"
-	$(HF_ENV) $(PYTHON) train/train.py --config $(CONFIG) $(EXTRA_ARGS)
+	$(HF_ENV) $(NDSWIN) train --config $(CONFIG) $(EXTRA_ARGS)
 
 train-bg:
 	@if [ ! -f "$(CONFIG)" ]; then echo "Error: Config not found: $(CONFIG)"; exit 1; fi
@@ -230,7 +175,7 @@ train-bg:
 	LOG="logs/$${STAMP}.log"; mkdir -p logs; \
 	echo "Starting background training: $(CONFIG)"; \
 	echo "Log: $${LOG}"; \
-	nohup $(HF_ENV) $(PYTHON) train/train.py --config $(CONFIG) $(EXTRA_ARGS) > "$${LOG}" 2>&1 & \
+	nohup $(HF_ENV) $(NDSWIN) train --config $(CONFIG) $(EXTRA_ARGS) > "$${LOG}" 2>&1 & \
 	echo "PID: $$!"
 
 train-tmux:
@@ -240,7 +185,7 @@ train-tmux:
 	SESSION="train_$${STAMP}"; \
 	LOG="logs/$${STAMP}.log"; mkdir -p logs; \
 	echo "Starting tmux session: $${SESSION}"; \
-	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(PYTHON) train/train.py --config $(CONFIG) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
+	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(NDSWIN) train --config $(CONFIG) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
 	echo "Attach: tmux attach -t $${SESSION}"; \
 	echo "Log:    tail -f $${LOG}"
 
@@ -251,27 +196,27 @@ sweep:
 	@if [ ! -f "$(SWEEP)" ]; then echo "Error: Sweep not found: $(SWEEP)"; exit 1; fi
 	@mkdir -p $(SWEEP_OUTDIR)
 	@echo "Sweep: $(SWEEP) → $(SWEEP_OUTDIR)"
-	$(HF_ENV) $(PYTHON) train/run_sweep.py --sweep $(SWEEP) $(TRIALS_ARG) --outdir $(SWEEP_OUTDIR) $(EXTRA_ARGS)
+	$(HF_ENV) $(NDSWIN) sweep --sweep $(SWEEP) $(TRIALS_ARG) --outdir $(SWEEP_OUTDIR) $(EXTRA_ARGS)
 
 sweep-tmux:
 	@if [ ! -f "$(SWEEP)" ]; then echo "Error: Sweep not found: $(SWEEP)"; exit 1; fi
 	@STAMP=$$(date +%Y%m%d_%H%M%S); \
 	SESSION="sweep_$${STAMP}"; LOG="logs/sweep_$${STAMP}.log"; mkdir -p logs; \
 	echo "Starting sweep in tmux: $${SESSION}"; \
-	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(PYTHON) train/run_sweep.py --sweep $(SWEEP) $(TRIALS_ARG) --outdir $(SWEEP_OUTDIR) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
+	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(NDSWIN) sweep --sweep $(SWEEP) $(TRIALS_ARG) --outdir $(SWEEP_OUTDIR) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
 	echo "Attach: tmux attach -t $${SESSION}"; echo "Log: $${LOG}"
 
 auto-sweep:
 	@if [ ! -f "$(SWEEP)" ]; then echo "Error: Sweep not found: $(SWEEP)"; exit 1; fi
 	@echo "Auto-sweep: $(SWEEP), train_epochs=$(TRAIN_EPOCHS)"
-	$(HF_ENV) $(PYTHON) train/auto_sweep_and_train.py --sweep $(SWEEP) $(TRIALS_ARG) --train-epochs $(TRAIN_EPOCHS) $(EXTRA_ARGS)
+	$(HF_ENV) $(NDSWIN) auto-sweep --sweep $(SWEEP) $(TRIALS_ARG) --train-epochs $(TRAIN_EPOCHS) $(EXTRA_ARGS)
 
 auto-sweep-tmux:
 	@if [ ! -f "$(SWEEP)" ]; then echo "Error: Sweep not found: $(SWEEP)"; exit 1; fi
 	@STAMP=$$(date +%Y%m%d_%H%M%S); \
 	SESSION="autosweep_$${STAMP}"; LOG="logs/autosweep_$${STAMP}.log"; mkdir -p logs; \
 	echo "Starting auto-sweep in tmux: $${SESSION}"; \
-	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(PYTHON) train/auto_sweep_and_train.py --sweep $(SWEEP) $(TRIALS_ARG) --train-epochs $(TRAIN_EPOCHS) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
+	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(NDSWIN) auto-sweep --sweep $(SWEEP) $(TRIALS_ARG) --train-epochs $(TRAIN_EPOCHS) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
 	echo "Attach: tmux attach -t $${SESSION}"; echo "Log: $${LOG}"
 
 # =============================================================================
@@ -280,14 +225,14 @@ auto-sweep-tmux:
 queue:
 	@if [ ! -f "$(QUEUE_FILE)" ]; then echo "Error: Queue not found: $(QUEUE_FILE)"; exit 1; fi
 	@echo "Running queue: $(QUEUE_FILE)"
-	$(HF_ENV) $(PYTHON) train/queue_runner.py --queue $(QUEUE_FILE) $(EXTRA_ARGS)
+	$(HF_ENV) $(NDSWIN) queue --queue $(QUEUE_FILE) $(EXTRA_ARGS)
 
 queue-tmux:
 	@if [ ! -f "$(QUEUE_FILE)" ]; then echo "Error: Queue not found: $(QUEUE_FILE)"; exit 1; fi
 	@STAMP=$$(date +%Y%m%d_%H%M%S); \
 	SESSION="queue_$${STAMP}"; LOG="logs/queue_$${STAMP}.log"; mkdir -p logs; \
 	echo "Starting queue in tmux: $${SESSION}"; \
-	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(PYTHON) train/queue_runner.py --queue $(QUEUE_FILE) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
+	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(NDSWIN) queue --queue $(QUEUE_FILE) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
 	echo "Attach: tmux attach -t $${SESSION}"; echo "Log: $${LOG}"
 
 # =============================================================================
@@ -295,7 +240,7 @@ queue-tmux:
 # =============================================================================
 fetch-data:
 	@echo "Fetching: $(HF_DATASET) → $(DATASET_DIR)"
-	$(HF_ENV) $(PYTHON) train/fetch_hf_dataset.py --hf-id "$(HF_DATASET)" --outdir "$(DATASET_DIR)" $(LIMIT_ARG)
+	$(HF_ENV) $(NDSWIN) fetch-data --hf-id "$(HF_DATASET)" --outdir "$(DATASET_DIR)" $(LIMIT_ARG)
 
 list-configs:
 	@echo "Configs:"; echo ""

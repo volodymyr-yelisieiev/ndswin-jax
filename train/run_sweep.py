@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Small hyperparameter sweep driver (random search).
-
-Usage:
-    python train/run_sweep.py --sweep configs/sweeps/cifar10_hyperparam_sweep.yaml
-
-This script samples hyperparameters, materializes per-trial ExperimentConfigs, and
-runs short-budget training to evaluate each trial. It writes trial configs and
-results into an output sweep directory.
-
-Notes:
-- Designed to work with the repository's `ndswin` API (no external scheduler required).
-- Default behavior is sequential execution. Use --dry-run to only generate configs.
-"""
+"""Thin compatibility wrapper for `ndswin sweep`."""
 
 from __future__ import annotations
 
@@ -226,7 +214,8 @@ def load_base_experiment(path: str | None) -> ExperimentConfig:
     return ExperimentConfig.from_dict(exp_dict)
 
 
-def run_trial(trial_idx: int, exp: ExperimentConfig, out_dir: Path, dry_run: bool = False, sweep_config: Dict[str, Any] = None) -> Dict[str, Any]:
+def run_trial(trial_idx: int, exp: ExperimentConfig, out_dir: Path, dry_run: bool = False, sweep_config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    sweep_config = sweep_config or {}
     # Bounded execution with a 1-hour timeout per trial
     timeout = 3600
     # Create a standardized per-trial output directory: out_dir/<dataset>/<stamp>/trial_XXX
@@ -487,7 +476,7 @@ def main() -> None:
             continue
 
         try:
-            res = run_trial(i, exp, outdir, dry_run=False, sweep_config=sweep_config)
+            res = run_trial(i, exp, outdir, dry_run=False, sweep_config=sweep)
             summary.append(res)
             # Write dataset-scoped summary next to trials
             summary_path = outdir / res.get("dataset", "dataset") / res.get("stamp", "stamp") / "summary.json"
