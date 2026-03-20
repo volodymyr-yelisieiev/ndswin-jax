@@ -1,22 +1,4 @@
-.PHONY: help install install-dev test lint format type-check docs clean clean-runs clean-all build check all dev train train-bg train-tmux list-configs sweep sweep-tmux auto-sweep auto-sweep-tmux queue queue-tmux fetch-data status archive-results optimize tensorboard stop-all show-best validate backup clean-logs
-
-# Use conda env tools if available, otherwise system tools
-CONDA_ENV := $(shell pwd)/envs/ndswin-jax
-ifneq ($(wildcard $(CONDA_ENV)/bin/python),)
-    PYTHON := $(CONDA_ENV)/bin/python -u
-    PIP := $(CONDA_ENV)/bin/pip
-    RUFF := $(CONDA_ENV)/bin/ruff
-    MYPY := $(CONDA_ENV)/bin/mypy
-    PYTEST := $(CONDA_ENV)/bin/pytest
-    SPHINX := $(CONDA_ENV)/bin/sphinx-build
-else
-    PYTHON := python -u
-    PIP := pip
-    RUFF := ruff
-    MYPY := mypy
-    PYTEST := pytest
-    SPHINX := sphinx-build
-endif
+.PHONY: help install install-dev test lint format type-check docs clean clean-runs clean-all build check all dev train train-bg train-tmux list-configs sweep sweep-tmux auto-sweep auto-sweep-tmux queue queue-tmux fetch-data status archive-results optimize tensorboard stop-all show-best validate backup clean-logs print-env-resolution
 
 # =============================================================================
 # Configurable Variables (override with make VAR=value)
@@ -49,8 +31,13 @@ help:
 	@echo "Usage: make <target> [VAR=value ...]"
 	@echo ""
 	@echo "★ Quick Start:"
+	@echo "  conda env create --prefix ./$(CONDA_PREFIX_DIR) -f environment.yml"
+	@echo "  conda activate ./$(CONDA_PREFIX_DIR)"
 	@echo "  optimize           One-command: fetch data → sweep → train best (THE recommended workflow)"
 	@echo "  validate           Smoke test: 2-epoch train + tests to verify pipeline health"
+	@echo ""
+	@echo "Environment:"
+	@echo "  CONDA_PREFIX_DIR=$(CONDA_PREFIX_DIR) (override if your project-local Conda prefix lives elsewhere)"
 	@echo ""
 	@echo "Training:"
 	@echo "  train              Train (CONFIG=path/to/config.json)"
@@ -100,6 +87,17 @@ help:
 	@echo "  make fetch-data HF_DATASET=jxie/modelnet40 DATASET_DIR=data/modelnet10"
 	@echo "  make queue-tmux QUEUE_FILE=configs/queues/queue_2d_3d.yaml"
 	@echo "  make tensorboard"
+
+print-env-resolution:
+	@echo "resolver=$(RESOLVED_TOOLCHAIN)"
+	@echo "conda_prefix_dir=$(CONDA_PREFIX_DIR)"
+	@echo "conda_bin_dir=$(CONDA_BIN_DIR)"
+	@echo "python_bin=$(PYTHON_BIN)"
+	@echo "pip=$(PIP)"
+	@echo "ruff=$(RUFF)"
+	@echo "pytest=$(PYTEST)"
+	@echo "mypy=$(MYPY)"
+	@echo "sphinx=$(SPHINX)"
 
 # =============================================================================
 # ★ One-Command Optimization (the recommended workflow)
