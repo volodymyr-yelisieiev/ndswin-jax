@@ -5,19 +5,198 @@ and dimensionalities.
 """
 
 import math
-import subprocess
-import sys
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+import subprocess
+import sys
 
 from ndswin.config import DataConfig
 from ndswin.types import Batch
+from ndswin.utils.logging import get_logger
+
+
+logger = get_logger("data")
+
+
+def normalize_split(split: str) -> str:
+    """Normalize supported split names to canonical values.
+
+    Args:
+        split: Requested split name.
+
+    Returns:
+        Canonical split name: ``train``, ``validation``, or ``test``.
+
+    Raises:
+        ValueError: If the split name is unsupported.
+    """
+    normalized = split.strip().lower()
+    if normalized == "train":
+        return "train"
+    if normalized in {"val", "validation"}:
+        return "validation"
+    if normalized == "test":
+        return "test"
+    raise ValueError(
+        f"Unsupported split '{split}'. Supported splits: train, val, validation, test."
+    )
+
+
+def _is_enabled_env(var_name: str) -> bool:
+    return os.getenv(var_name, "0").lower() in {"1", "true", "yes"}
+
+
+def resolve_folder_split(
+    data_dir: str,
+    split: str,
+    *,
+    source_name: str,
+    allow_validation_fallback: bool | None = None,
+    allow_test_fallback: bool | None = None,
+) -> str:
+    """Resolve a canonical split to an on-disk folder name.
+
+    Supported exact layouts:
+      - train/
+      - validation/
+      - val/
+      - test/
+
+    Validation fallback to ``test`` or ``train`` is opt-in via
+    ``ALLOW_VALIDATION_SPLIT_FALLBACK``. Test fallback to ``train`` remains
+    opt-in via ``ALLOW_TEST_SPLIT_FALLBACK``.
+    """
+    normalized_split = normalize_split(split)
+    available_dirs = {
+        path.name for path in Path(data_dir).iterdir() if path.is_dir()
+    } if Path(data_dir).exists() else set()
+
+    if normalized_split == "train":
+        if "train" in available_dirs:
+            return "train"
+        raise FileNotFoundError(
+            f"{source_name}: train split directory not found under {data_dir}."
+        )
+
+    if normalized_split == "validation":
+        if "validation" in available_dirs:
+            return "validation"
+        if "val" in available_dirs:
+            logger.info(
+                "%s: using 'val' directory as validation split under %s.",
+                source_name,
+                data_dir,
+            )
+            return "val"
+
+        allow_validation_fallback = (
+            _is_enabled_env("ALLOW_VALIDATION_SPLIT_FALLBACK")
+            if allow_validation_fallback is None
+            else allow_validation_fallback
+        )
+        if allow_validation_fallback:
+            for fallback in ("test", "train"):
+                if fallback in available_dirs:
+                    logger.warning(
+                        "%s: requested validation split, but no validation/ or val/ directory exists under %s; "
+                        "falling back to '%s' because ALLOW_VALIDATION_SPLIT_FALLBACK is enabled.",
+                        source_name,
+                        data_dir,
+                        fallback,
+                    )
+                    return fallback
+
+        raise FileNotFoundError(
+            f"{source_name}: validation split requested, but neither validation/ nor val/ exists under {data_dir}. "
+            "To allow fallback to test/ or train/, set ALLOW_VALIDATION_SPLIT_FALLBACK=1."
+        )
+
+    if "test" in available_dirs:
+        return "test"
+
+    allow_test_fallback = (
+        _is_enabled_env("ALLOW_TEST_SPLIT_FALLBACK")
+        if allow_test_fallback is None
+        else allow_test_fallback
+    )
+    if allow_test_fallback and "train" in available_dirs:
+        logger.warning(
+            "%s: requested test split, but no test/ directory exists under %s; "
+            "falling back to 'train' because ALLOW_TEST_SPLIT_FALLBACK is enabled.",
+            source_name,
+            data_dir,
+        )
+        return "train"
+
+    raise FileNotFoundError(
+        f"{source_name}: test split requested, but test/ does not exist under {data_dir}. "
+        "To allow fallback to train/, set ALLOW_TEST_SPLIT_FALLBACK=1."
+    )
+
+
+def resolve_hf_split(hf_id: str, split: str, *, data_dir: str | None = None) -> str:
+    """Resolve a canonical split to an available Hugging Face dataset split."""
+    normalized_split = normalize_split(split)
+
+    try:
+        from datasets import get_dataset_split_names
+    except Exception as e:  # pragma: no cover - runtime optional
+        raise RuntimeError("To use Hugging Face datasets install 'datasets' (pip install datasets)") from e
+
+    available_splits = set(get_dataset_split_names(hf_id, data_dir=data_dir) or [])
+
+    if normalized_split == "train":
+        if "train" in available_splits:
+            return "train"
+        raise ValueError(
+            f"Hugging Face dataset '{hf_id}' does not provide a train split. "
+            f"Available splits: {sorted(available_splits)}"
+        )
+
+    if normalized_split == "validation":
+        if "validation" in available_splits:
+            return "validation"
+        if "val" in available_splits:
+            logger.warning(
+                "Hugging Face dataset '%s' does not provide a 'validation' split; using 'val' instead.",
+                hf_id,
+            )
+            return "val"
+        for fallback in ("test", "train"):
+            if fallback in available_splits:
+                logger.warning(
+                    "Hugging Face dataset '%s' does not provide a validation split; using '%s' instead.",
+                    hf_id,
+                    fallback,
+                )
+                return fallback
+        raise ValueError(
+            f"Hugging Face dataset '{hf_id}' does not provide a validation split. "
+            f"Available splits: {sorted(available_splits)}"
+        )
+
+    if "test" in available_splits:
+        return "test"
+    if "train" in available_splits and _is_enabled_env("ALLOW_TEST_SPLIT_FALLBACK"):
+        logger.warning(
+            "Hugging Face dataset '%s' does not provide a test split; using 'train' because "
+            "ALLOW_TEST_SPLIT_FALLBACK is enabled.",
+            hf_id,
+        )
+        return "train"
+
+    raise ValueError(
+        f"Hugging Face dataset '{hf_id}' does not provide a test split. "
+        f"Available splits: {sorted(available_splits)}"
+    )
 
 
 @dataclass
@@ -138,7 +317,7 @@ class CIFARDataLoader(DataLoader):
         super().__init__(batch_size, shuffle, drop_last, 0, seed)
         self.name = name
         self.data_dir = data_dir
-        self.split = split
+        self.split = normalize_split(split)
         self.transform = transform
         self.download = download
         self.mean = mean
@@ -148,9 +327,9 @@ class CIFARDataLoader(DataLoader):
         self.x, self.y = self._load_data()
 
         # Implement 90/10 train/val split for CIFAR if needed
-        if self.split in ["train", "val", "validation"]:
-            val_size = 5000 if self.num_classes == 10 else 5000  # 10% of 50k
-            if self.split in ["val", "validation"]:
+        if self.split in ["train", "validation"]:
+            val_size = 5000 if self.num_classes == 10 else 5000 # 10% of 50k
+            if self.split == "validation":
                 self.x = self.x[-val_size:]
                 self.y = self.y[-val_size:]
             else:
@@ -385,7 +564,12 @@ class VolumeFolderDataLoader(DataLoader):
         super().__init__(batch_size, shuffle, drop_last, 0, seed)
         self.name = name
         self.data_dir = data_dir
-        self.split = split
+        self.requested_split = normalize_split(split)
+        self.split = resolve_folder_split(
+            data_dir,
+            self.requested_split,
+            source_name=f"{self.__class__.__name__}({name})",
+        )
         self.transform = transform
         self.in_channels = in_channels
         self.image_size = tuple(image_size)
@@ -560,7 +744,12 @@ class NumpySegmentationFolderDataLoader(DataLoader):
         super().__init__(batch_size, shuffle, drop_last, 0, seed)
         self.name = name
         self.data_dir = data_dir
-        self.split = split
+        self.requested_split = normalize_split(split)
+        self.split = resolve_folder_split(
+            data_dir,
+            self.requested_split,
+            source_name=f"{self.__class__.__name__}({name})",
+        )
         self.transform = transform
         self.in_channels = in_channels
         self.image_size = tuple(image_size)
@@ -743,7 +932,8 @@ class HuggingFaceDataLoader(DataLoader):
     ) -> None:
         super().__init__(batch_size, shuffle, drop_last, 0, seed)
         self.hf_id = hf_id
-        self.split = split
+        self.requested_split = normalize_split(split)
+        self.split = resolve_hf_split(hf_id, self.requested_split, data_dir=data_dir)
         self.in_channels = in_channels
         self.image_size = tuple(image_size) if image_size is not None else None
         self.mean = mean
@@ -759,7 +949,7 @@ class HuggingFaceDataLoader(DataLoader):
             ) from e
 
         # Load the split (may download the dataset)
-        ds = load_dataset(hf_id, split=split, data_dir=self.data_dir)
+        ds = load_dataset(hf_id, split=self.split, data_dir=self.data_dir)
         # Materialize into memory list for simpler iteration
         self._examples = list(ds)
         self.num_samples = len(self._examples)
@@ -1022,8 +1212,9 @@ def create_data_loader(
     """Create a data loader from configuration."""
     from ndswin.training.augmentation import create_augmentation_pipeline
 
+    normalized_split = normalize_split(split)
     bs = batch_size
-    is_train = split == "train"
+    is_train = normalized_split == "train"
 
     ds = config.dataset.lower()
     # Certain loaders handle normalization internally (CIFAR, VolumeFolder)
@@ -1042,7 +1233,7 @@ def create_data_loader(
 
     kwargs = {
         "data_dir": config.data_dir,
-        "split": split,
+        "split": normalized_split,
         "batch_size": bs,
         "shuffle": is_train,
         "download": config.download,
@@ -1058,9 +1249,9 @@ def create_data_loader(
         return VolumeFolderDataLoader(
             name=config.dataset,
             data_dir=config.data_dir,
-            split="train" if split in ["train", "val"] else "test",
+            split=normalized_split,
             batch_size=bs,
-            shuffle=(split == "train"),
+            shuffle=is_train,
             seed=config.download if hasattr(config, "download") else 42,
             in_channels=config.in_channels,
             image_size=config.image_size,
@@ -1070,43 +1261,18 @@ def create_data_loader(
         )
     elif ds in {"medseg_msd", "medseg", "medseg_brain_tumour"}:
         # Numpy/NPZ-based segmentation dataset exported by train/fetch_medseg_msd.py
-        from pathlib import Path
-
-        requested_split = "train" if split in ["train", "val"] else "test"
-        split_dir = Path(config.data_dir) / requested_split
-        if not split_dir.exists():
-            # If requested split missing, only allow fallback to 'train' if explicitly enabled
-            train_dir = Path(config.data_dir) / "train"
-            allow_fallback = False
-            try:
-                import os
-
-                allow_fallback = os.getenv("ALLOW_TEST_SPLIT_FALLBACK", "0").lower() in (
-                    "1",
-                    "true",
-                    "yes",
-                )
-            except Exception:
-                allow_fallback = False
-
-            if requested_split == "test" and train_dir.exists() and allow_fallback:
-                print(
-                    f"Warning: {split_dir} not found; ALLOW_TEST_SPLIT_FALLBACK is set, falling back to 'train' split for {split} loader (not recommended)"
-                )
-                requested_split = "train"
-            else:
-                raise FileNotFoundError(
-                    f"Test split not found: {split_dir}.\n"
-                    "Please export the dataset with 'train/fetch_hf_dataset.py --hf-id <HF_ID> --outdir <data_dir>'\n"
-                    "or set ALLOW_TEST_SPLIT_FALLBACK=1 to use the train split for evaluation (not recommended)."
-                )
+        requested_split = resolve_folder_split(
+            config.data_dir,
+            normalized_split,
+            source_name=f"create_data_loader({config.dataset})",
+        )
 
         return NumpySegmentationFolderDataLoader(
             name=config.dataset,
             data_dir=config.data_dir,
             split=requested_split,
             batch_size=bs,
-            shuffle=(split == "train"),
+            shuffle=is_train,
             seed=42,
             in_channels=config.in_channels,
             image_size=config.image_size,
@@ -1121,7 +1287,7 @@ def create_data_loader(
         try:
             return HuggingFaceDataLoader(
                 hf_id=hf_id,
-                split="train" if split in ["train", "val"] else "test",
+                split=normalized_split,
                 batch_size=bs,
                 shuffle=is_train,
                 seed=config.download if hasattr(config, "download") else 42,
@@ -1184,9 +1350,9 @@ def create_data_loader(
                 return NumpySegmentationFolderDataLoader(
                     name=config.dataset,
                     data_dir=str(outdir),
-                    split="train" if split in ["train", "val"] else "test",
+                    split=normalized_split,
                     batch_size=bs,
-                    shuffle=(split == "train"),
+                    shuffle=is_train,
                     seed=42,
                     in_channels=config.in_channels,
                     image_size=config.image_size,

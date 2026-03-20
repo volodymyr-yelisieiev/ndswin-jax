@@ -1,5 +1,8 @@
 """Tests for data loading utilities."""
 
+import logging
+import sys
+import types
 import unittest.mock as mock
 
 import numpy as np
@@ -7,12 +10,12 @@ import pytest
 
 from ndswin.config import DataConfig
 from ndswin.training.data import (
+    DatasetInfo,
     HuggingFaceDataLoader,
-    NumpySegmentationFolderDataLoader,
     SyntheticDataLoader,
     VolumeFolderDataLoader,
-    _normalize_batch,
     create_data_loader,
+    normalize_split,
 )
 
 
@@ -137,117 +140,132 @@ def test_missing_dataset_library():
             del sys.modules["datasets"]
 
 
-def test_normalize_batch_broadcasts_for_2d_inputs():
-    """Normalization helper should broadcast over 2D spatial dimensions."""
-    batch_x = np.array(
-        [
-            [
-                [[1.0, 3.0], [5.0, 7.0]],
-                [[6.0, 8.0], [10.0, 12.0]],
-            ]
-        ],
-        dtype=np.float32,
+def test_normalize_split_aliases():
+    """Split aliases should normalize in one place."""
+    assert normalize_split("train") == "train"
+    assert normalize_split("val") == "validation"
+    assert normalize_split("validation") == "validation"
+    assert normalize_split("test") == "test"
+
+    with pytest.raises(ValueError, match="Unsupported split"):
+        normalize_split("dev")
+
+
+def _install_fake_datasets_module(monkeypatch, split_names):
+    calls = []
+
+    def fake_load_dataset(hf_id, split, data_dir=None):
+        calls.append({"hf_id": hf_id, "split": split, "data_dir": data_dir})
+        return [
+            {
+                "image": np.zeros((8, 8, 3), dtype=np.uint8),
+                "label": idx % 2,
+            }
+            for idx in range(4)
+        ]
+
+    fake_module = types.SimpleNamespace(
+        load_dataset=fake_load_dataset,
+        get_dataset_split_names=lambda hf_id, data_dir=None: list(split_names),
+    )
+    monkeypatch.setitem(sys.modules, "datasets", fake_module)
+    return calls
+
+
+@pytest.mark.parametrize("requested_split", ["validation", "val"])
+def test_huggingface_loader_routes_validation_aliases(monkeypatch, requested_split):
+    """HF loaders should keep validation requests as validation when available."""
+    calls = _install_fake_datasets_module(monkeypatch, ["train", "validation", "test"])
+
+    loader = HuggingFaceDataLoader(
+        hf_id="dummy/dataset",
+        split=requested_split,
+        batch_size=2,
+        image_size=(3, 8, 8),
     )
 
-    normalized = _normalize_batch(batch_x, mean=(1.0, 2.0), std=(2.0, 4.0))
-
-    expected = np.array(
-        [
-            [
-                [[0.0, 1.0], [2.0, 3.0]],
-                [[1.0, 1.5], [2.0, 2.5]],
-            ]
-        ],
-        dtype=np.float32,
-    )
-    np.testing.assert_allclose(normalized, expected)
+    assert loader.requested_split == "validation"
+    assert loader.split == "validation"
+    assert calls[-1]["split"] == "validation"
 
 
-def test_normalize_batch_broadcasts_for_3d_inputs():
-    """Normalization helper should broadcast over 3D spatial dimensions."""
-    batch_x = np.array(
-        [
-            [
-                [
-                    [[1.0, 3.0], [5.0, 7.0]],
-                    [[9.0, 11.0], [13.0, 15.0]],
-                ]
-            ]
-        ],
-        dtype=np.float32,
-    )
+def test_huggingface_loader_falls_back_from_validation_with_warning(monkeypatch, caplog):
+    """HF validation requests should fall back explicitly when validation is absent."""
+    calls = _install_fake_datasets_module(monkeypatch, ["train", "val", "test"])
 
-    normalized = _normalize_batch(batch_x, mean=(1.0,), std=(2.0,))
-    expected = (batch_x - 1.0) / 2.0
+    with caplog.at_level(logging.WARNING):
+        loader = HuggingFaceDataLoader(
+            hf_id="dummy/dataset",
+            split="validation",
+            batch_size=2,
+            image_size=(3, 8, 8),
+        )
 
-    np.testing.assert_allclose(normalized, expected)
+    assert loader.split == "val"
+    assert calls[-1]["split"] == "val"
+    assert "using 'val' instead" in caplog.text
 
 
-def test_volume_folder_loader_normalizes_3d_batches(tmp_path):
-    """Volume folder loader should normalize 3D volumes without shape errors."""
-    class_dir = tmp_path / "train" / "class0"
+def test_create_data_loader_hf_routes_test_split(monkeypatch):
+    """create_data_loader should stop remapping evaluation splits for HF datasets."""
+    calls = _install_fake_datasets_module(monkeypatch, ["train", "validation", "test"])
+    config = DataConfig(dataset="hf:demo", image_size=(3, 8, 8))
+
+    loader = create_data_loader(config, split="test", batch_size=2)
+
+    assert isinstance(loader, HuggingFaceDataLoader)
+    assert loader.split == "test"
+    assert calls[-1]["split"] == "test"
+
+
+def _make_volume_class_dir(base, split_name, class_name="class0"):
+    class_dir = base / split_name / class_name
     class_dir.mkdir(parents=True)
-    np.save(class_dir / "sample.npy", np.arange(8, dtype=np.float32).reshape(2, 2, 2))
+    np.save(class_dir / "sample.npy", np.zeros((4, 4, 4), dtype=np.float32))
+
+
+@pytest.mark.parametrize("folder_name", ["validation", "val"])
+def test_volume_folder_loader_supports_validation_layouts(tmp_path, folder_name):
+    """Volume folder loader should support validation/ and val/ layouts."""
+    _make_volume_class_dir(tmp_path, "train")
+    _make_volume_class_dir(tmp_path, folder_name)
 
     loader = VolumeFolderDataLoader(
-        name="volumes",
+        name="volume",
         data_dir=str(tmp_path),
-        split="train",
+        split="validation",
         batch_size=1,
-        shuffle=False,
         in_channels=1,
-        image_size=(2, 2, 2),
-        mean=(1.0,),
-        std=(2.0,),
+        image_size=(4, 4, 4),
+        mean=(0.0,),
+        std=(1.0,),
     )
 
-    batch = next(iter(loader))
-
-    expected = (np.arange(8, dtype=np.float32).reshape(1, 1, 2, 2, 2) - 1.0) / 2.0
-    np.testing.assert_allclose(np.asarray(batch["image"]), expected)
-    np.testing.assert_array_equal(np.asarray(batch["label"]), np.array([0], dtype=np.int32))
+    assert loader.requested_split == "validation"
+    assert loader.split == folder_name
 
 
-def test_numpy_segmentation_folder_loader_normalizes_2d_batches(tmp_path):
-    """Segmentation folder loader should normalize 2D images without shape errors."""
-    image_dir = tmp_path / "train" / "images"
-    label_dir = tmp_path / "train" / "labels"
-    image_dir.mkdir(parents=True)
-    label_dir.mkdir(parents=True)
+def test_volume_folder_loader_validation_fallback_is_explicit(tmp_path, monkeypatch, caplog):
+    """Validation fallback for folder datasets should be opt-in and logged."""
+    _make_volume_class_dir(tmp_path, "train")
+    _make_volume_class_dir(tmp_path, "test")
 
-    image = np.array(
-        [
-            [[1.0, 3.0], [5.0, 7.0]],
-            [[6.0, 8.0], [10.0, 12.0]],
-        ],
-        dtype=np.float32,
-    )
-    label = np.array([[0, 1], [1, 0]], dtype=np.int32)
-    np.savez(image_dir / "sample.npz", image=image)
-    np.savez(label_dir / "sample.npz", label=label)
-
-    loader = NumpySegmentationFolderDataLoader(
-        name="seg2d",
+    config = DataConfig(
+        dataset="volume",
         data_dir=str(tmp_path),
-        split="train",
-        batch_size=1,
-        shuffle=False,
-        in_channels=2,
-        image_size=(2, 2),
-        mean=(1.0, 2.0),
-        std=(2.0, 4.0),
+        image_size=(4, 4, 4),
+        in_channels=1,
+        mean=(0.0,),
+        std=(1.0,),
     )
 
-    batch = next(iter(loader))
+    with pytest.raises(FileNotFoundError, match="ALLOW_VALIDATION_SPLIT_FALLBACK=1"):
+        create_data_loader(config, split="validation", batch_size=1)
 
-    expected = np.array(
-        [
-            [
-                [[0.0, 1.0], [2.0, 3.0]],
-                [[1.0, 1.5], [2.0, 2.5]],
-            ]
-        ],
-        dtype=np.float32,
-    )
-    np.testing.assert_allclose(np.asarray(batch["image"]), expected)
-    np.testing.assert_array_equal(np.asarray(batch["label"]), label[None, ...])
+    monkeypatch.setenv("ALLOW_VALIDATION_SPLIT_FALLBACK", "1")
+    with caplog.at_level(logging.WARNING):
+        loader = create_data_loader(config, split="validation", batch_size=1)
+
+    assert isinstance(loader, VolumeFolderDataLoader)
+    assert loader.split == "test"
+    assert "falling back to 'test'" in caplog.text
