@@ -5,9 +5,11 @@ and dimensionalities.
 """
 
 import math
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import jax
@@ -15,10 +17,186 @@ import jax.numpy as jnp
 import numpy as np
 import subprocess
 import sys
-from pathlib import Path
 
 from ndswin.config import DataConfig
 from ndswin.types import Batch
+from ndswin.utils.logging import get_logger
+
+
+logger = get_logger("data")
+
+
+def normalize_split(split: str) -> str:
+    """Normalize supported split names to canonical values.
+
+    Args:
+        split: Requested split name.
+
+    Returns:
+        Canonical split name: ``train``, ``validation``, or ``test``.
+
+    Raises:
+        ValueError: If the split name is unsupported.
+    """
+    normalized = split.strip().lower()
+    if normalized == "train":
+        return "train"
+    if normalized in {"val", "validation"}:
+        return "validation"
+    if normalized == "test":
+        return "test"
+    raise ValueError(
+        f"Unsupported split '{split}'. Supported splits: train, val, validation, test."
+    )
+
+
+def _is_enabled_env(var_name: str) -> bool:
+    return os.getenv(var_name, "0").lower() in {"1", "true", "yes"}
+
+
+def resolve_folder_split(
+    data_dir: str,
+    split: str,
+    *,
+    source_name: str,
+    allow_validation_fallback: bool | None = None,
+    allow_test_fallback: bool | None = None,
+) -> str:
+    """Resolve a canonical split to an on-disk folder name.
+
+    Supported exact layouts:
+      - train/
+      - validation/
+      - val/
+      - test/
+
+    Validation fallback to ``test`` or ``train`` is opt-in via
+    ``ALLOW_VALIDATION_SPLIT_FALLBACK``. Test fallback to ``train`` remains
+    opt-in via ``ALLOW_TEST_SPLIT_FALLBACK``.
+    """
+    normalized_split = normalize_split(split)
+    available_dirs = {
+        path.name for path in Path(data_dir).iterdir() if path.is_dir()
+    } if Path(data_dir).exists() else set()
+
+    if normalized_split == "train":
+        if "train" in available_dirs:
+            return "train"
+        raise FileNotFoundError(
+            f"{source_name}: train split directory not found under {data_dir}."
+        )
+
+    if normalized_split == "validation":
+        if "validation" in available_dirs:
+            return "validation"
+        if "val" in available_dirs:
+            logger.info(
+                "%s: using 'val' directory as validation split under %s.",
+                source_name,
+                data_dir,
+            )
+            return "val"
+
+        allow_validation_fallback = (
+            _is_enabled_env("ALLOW_VALIDATION_SPLIT_FALLBACK")
+            if allow_validation_fallback is None
+            else allow_validation_fallback
+        )
+        if allow_validation_fallback:
+            for fallback in ("test", "train"):
+                if fallback in available_dirs:
+                    logger.warning(
+                        "%s: requested validation split, but no validation/ or val/ directory exists under %s; "
+                        "falling back to '%s' because ALLOW_VALIDATION_SPLIT_FALLBACK is enabled.",
+                        source_name,
+                        data_dir,
+                        fallback,
+                    )
+                    return fallback
+
+        raise FileNotFoundError(
+            f"{source_name}: validation split requested, but neither validation/ nor val/ exists under {data_dir}. "
+            "To allow fallback to test/ or train/, set ALLOW_VALIDATION_SPLIT_FALLBACK=1."
+        )
+
+    if "test" in available_dirs:
+        return "test"
+
+    allow_test_fallback = (
+        _is_enabled_env("ALLOW_TEST_SPLIT_FALLBACK")
+        if allow_test_fallback is None
+        else allow_test_fallback
+    )
+    if allow_test_fallback and "train" in available_dirs:
+        logger.warning(
+            "%s: requested test split, but no test/ directory exists under %s; "
+            "falling back to 'train' because ALLOW_TEST_SPLIT_FALLBACK is enabled.",
+            source_name,
+            data_dir,
+        )
+        return "train"
+
+    raise FileNotFoundError(
+        f"{source_name}: test split requested, but test/ does not exist under {data_dir}. "
+        "To allow fallback to train/, set ALLOW_TEST_SPLIT_FALLBACK=1."
+    )
+
+
+def resolve_hf_split(hf_id: str, split: str, *, data_dir: str | None = None) -> str:
+    """Resolve a canonical split to an available Hugging Face dataset split."""
+    normalized_split = normalize_split(split)
+
+    try:
+        from datasets import get_dataset_split_names
+    except Exception as e:  # pragma: no cover - runtime optional
+        raise RuntimeError("To use Hugging Face datasets install 'datasets' (pip install datasets)") from e
+
+    available_splits = set(get_dataset_split_names(hf_id, data_dir=data_dir) or [])
+
+    if normalized_split == "train":
+        if "train" in available_splits:
+            return "train"
+        raise ValueError(
+            f"Hugging Face dataset '{hf_id}' does not provide a train split. "
+            f"Available splits: {sorted(available_splits)}"
+        )
+
+    if normalized_split == "validation":
+        if "validation" in available_splits:
+            return "validation"
+        if "val" in available_splits:
+            logger.warning(
+                "Hugging Face dataset '%s' does not provide a 'validation' split; using 'val' instead.",
+                hf_id,
+            )
+            return "val"
+        for fallback in ("test", "train"):
+            if fallback in available_splits:
+                logger.warning(
+                    "Hugging Face dataset '%s' does not provide a validation split; using '%s' instead.",
+                    hf_id,
+                    fallback,
+                )
+                return fallback
+        raise ValueError(
+            f"Hugging Face dataset '{hf_id}' does not provide a validation split. "
+            f"Available splits: {sorted(available_splits)}"
+        )
+
+    if "test" in available_splits:
+        return "test"
+    if "train" in available_splits and _is_enabled_env("ALLOW_TEST_SPLIT_FALLBACK"):
+        logger.warning(
+            "Hugging Face dataset '%s' does not provide a test split; using 'train' because "
+            "ALLOW_TEST_SPLIT_FALLBACK is enabled.",
+            hf_id,
+        )
+        return "train"
+
+    raise ValueError(
+        f"Hugging Face dataset '{hf_id}' does not provide a test split. "
+        f"Available splits: {sorted(available_splits)}"
+    )
 
 
 @dataclass
@@ -86,6 +264,38 @@ class DataLoader(ABC):
         self._rng = np.random.RandomState(self.seed)
 
 
+def _reshape_channel_stats(
+    stats: tuple[float, ...],
+    num_channels: int,
+    num_spatial_dims: int,
+) -> np.ndarray:
+    """Reshape per-channel stats for broadcasting over N-D spatial inputs."""
+    stats_array = np.asarray(stats, dtype=np.float32).reshape(-1)
+    if stats_array.size == 1 and num_channels != 1:
+        stats_array = np.repeat(stats_array, num_channels)
+    elif stats_array.size != num_channels:
+        raise ValueError(
+            f"Expected normalization stats with 1 or {num_channels} values, got {stats_array.size}"
+        )
+    return stats_array.reshape((1, num_channels) + (1,) * num_spatial_dims)
+
+
+def _normalize_batch(
+    batch_x: np.ndarray,
+    mean: tuple[float, ...],
+    std: tuple[float, ...],
+) -> np.ndarray:
+    """Normalize a batch with shape (B, C, *spatial_dims)."""
+    if batch_x.ndim < 3:
+        raise ValueError(f"Expected batch with shape (B, C, *spatial_dims), got {batch_x.shape}")
+
+    num_channels = batch_x.shape[1]
+    num_spatial_dims = batch_x.ndim - 2
+    mean_array = _reshape_channel_stats(mean, num_channels, num_spatial_dims)
+    std_array = _reshape_channel_stats(std, num_channels, num_spatial_dims)
+    return (batch_x - mean_array) / std_array
+
+
 class CIFARDataLoader(DataLoader):
     """Base class for CIFAR data loaders."""
 
@@ -107,7 +317,7 @@ class CIFARDataLoader(DataLoader):
         super().__init__(batch_size, shuffle, drop_last, 0, seed)
         self.name = name
         self.data_dir = data_dir
-        self.split = split
+        self.split = normalize_split(split)
         self.transform = transform
         self.download = download
         self.mean = mean
@@ -115,17 +325,17 @@ class CIFARDataLoader(DataLoader):
         self.num_classes = num_classes
 
         self.x, self.y = self._load_data()
-        
+
         # Implement 90/10 train/val split for CIFAR if needed
-        if self.split in ["train", "val", "validation"]:
+        if self.split in ["train", "validation"]:
             val_size = 5000 if self.num_classes == 10 else 5000 # 10% of 50k
-            if self.split in ["val", "validation"]:
+            if self.split == "validation":
                 self.x = self.x[-val_size:]
                 self.y = self.y[-val_size:]
             else:
                 self.x = self.x[:-val_size]
                 self.y = self.y[:-val_size]
-        
+
         self.num_samples = len(self.x)
 
     def _load_data(self) -> tuple[np.ndarray, np.ndarray]:
@@ -201,10 +411,10 @@ class CIFARDataLoader(DataLoader):
         B, C, H, W = batch_x.shape
 
         # --- Vectorized RandomCrop with padding=4 ---
-        if getattr(getattr(self, '_do_random_crop', None), '__bool__', lambda: True)():
+        if getattr(getattr(self, "_do_random_crop", None), "__bool__", lambda: True)():
             pad = 4
             # Pad spatial dims: (B, C, H+2p, W+2p)
-            padded = np.pad(batch_x, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode='constant')
+            padded = np.pad(batch_x, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode="constant")
             PH, PW = padded.shape[2], padded.shape[3]
 
             # Sample per-image crop offsets
@@ -212,10 +422,9 @@ class CIFARDataLoader(DataLoader):
             left = self._rng.randint(0, PW - W + 1, size=B)
 
             # Gather crops vectorized
-            cropped = np.stack([
-                padded[i, :, top[i]:top[i] + H, left[i]:left[i] + W]
-                for i in range(B)
-            ], axis=0)
+            cropped = np.stack(
+                [padded[i, :, top[i] : top[i] + H, left[i] : left[i] + W] for i in range(B)], axis=0
+            )
             batch_x = cropped
 
         # --- Vectorized RandomHorizontalFlip ---
@@ -236,9 +445,6 @@ class CIFARDataLoader(DataLoader):
         if self.shuffle:
             self._rng.shuffle(indices)
 
-        mean = np.array(self.mean).reshape(1, 3, 1, 1)
-        std = np.array(self.std).reshape(1, 3, 1, 1)
-
         for start in range(0, self.num_samples, self.batch_size):
             end = min(start + self.batch_size, self.num_samples)
             if self.drop_last and end - start < self.batch_size:
@@ -249,7 +455,7 @@ class CIFARDataLoader(DataLoader):
             batch_y = self.y[batch_indices]
 
             # Normalize
-            batch_x = (batch_x - mean) / std
+            batch_x = _normalize_batch(batch_x, self.mean, self.std)
 
             # Vectorized batch augmentation (numpy-based, no per-sample Python loop)
             batch_x = self._augment_batch(batch_x)
@@ -358,7 +564,12 @@ class VolumeFolderDataLoader(DataLoader):
         super().__init__(batch_size, shuffle, drop_last, 0, seed)
         self.name = name
         self.data_dir = data_dir
-        self.split = split
+        self.requested_split = normalize_split(split)
+        self.split = resolve_folder_split(
+            data_dir,
+            self.requested_split,
+            source_name=f"{self.__class__.__name__}({name})",
+        )
         self.transform = transform
         self.in_channels = in_channels
         self.image_size = tuple(image_size)
@@ -381,7 +592,9 @@ class VolumeFolderDataLoader(DataLoader):
         if not os.path.isdir(split_dir):
             raise FileNotFoundError(f"Split directory not found: {split_dir}")
 
-        classes = [d for d in sorted(os.listdir(split_dir)) if os.path.isdir(os.path.join(split_dir, d))]
+        classes = [
+            d for d in sorted(os.listdir(split_dir)) if os.path.isdir(os.path.join(split_dir, d))
+        ]
         if not classes:
             raise ValueError(f"No class subdirectories found in {split_dir}")
 
@@ -418,7 +631,9 @@ class VolumeFolderDataLoader(DataLoader):
 
         # Validate channels
         if arr.shape[0] != self.in_channels:
-            raise ValueError(f"File {path} has {arr.shape[0]} channels but expected {self.in_channels}")
+            raise ValueError(
+                f"File {path} has {arr.shape[0]} channels but expected {self.in_channels}"
+            )
 
         # If sample spatial differs from expected image_size, allow resize by pad/crop
         spatial = arr.shape[1:]
@@ -456,7 +671,7 @@ class VolumeFolderDataLoader(DataLoader):
 
             # Apply padding
             pad_width = [(0, 0)] + pads
-            new_arr = np.pad(new_arr, pad_width, mode='constant', constant_values=0)
+            new_arr = np.pad(new_arr, pad_width, mode="constant", constant_values=0)
 
         return new_arr.astype(np.float32)
 
@@ -464,9 +679,6 @@ class VolumeFolderDataLoader(DataLoader):
         indices = np.arange(self.num_samples)
         if self.shuffle:
             self._rng.shuffle(indices)
-
-        mean = np.array(self.mean).reshape(1, -1, 1, 1)
-        std = np.array(self.std).reshape(1, -1, 1, 1)
 
         for start in range(0, self.num_samples, self.batch_size):
             end = min(start + self.batch_size, self.num_samples)
@@ -478,10 +690,7 @@ class VolumeFolderDataLoader(DataLoader):
             batch_x = np.stack([self._load_file(self.file_paths[i]) for i in batch_indices])
             batch_y = np.array([self.labels[i] for i in batch_indices])
 
-            # Normalize: expect (B, C, D, H, W)
-            # mean/std shapes: (1, C, 1, 1)
-            # Bring to (B, C, D, H, W) and normalize along spatial dims
-            batch_x = (batch_x - mean) / std
+            batch_x = _normalize_batch(batch_x, self.mean, self.std)
 
             if self.transform is not None:
                 # transform should accept (numpy array, rng) similar to CIFAR transforms
@@ -535,7 +744,12 @@ class NumpySegmentationFolderDataLoader(DataLoader):
         super().__init__(batch_size, shuffle, drop_last, 0, seed)
         self.name = name
         self.data_dir = data_dir
-        self.split = split
+        self.requested_split = normalize_split(split)
+        self.split = resolve_folder_split(
+            data_dir,
+            self.requested_split,
+            source_name=f"{self.__class__.__name__}({name})",
+        )
         self.transform = transform
         self.in_channels = in_channels
         self.image_size = tuple(image_size)
@@ -590,9 +804,6 @@ class NumpySegmentationFolderDataLoader(DataLoader):
         if self.shuffle:
             self._rng.shuffle(indices)
 
-        mean = np.array(self.mean).reshape(1, -1, 1, 1)
-        std = np.array(self.std).reshape(1, -1, 1, 1)
-
         for start in range(0, self.num_samples, self.batch_size):
             end = min(start + self.batch_size, self.num_samples)
             if self.drop_last and end - start < self.batch_size:
@@ -634,7 +845,7 @@ class NumpySegmentationFolderDataLoader(DataLoader):
                             pads.append((0, 0))
                             crops.append((0, cur))
                     slices = [slice(None)]
-                    for (s, e) in crops:
+                    for s, e in crops:
                         slices.append(slice(s, e))
                     img = img[tuple(slices)]
                     pad_pattern = [(0, 0)] + pads
@@ -663,7 +874,7 @@ class NumpySegmentationFolderDataLoader(DataLoader):
                             pads.append((0, 0))
                             crops.append((0, cur))
                     slices = []
-                    for (s, e) in crops:
+                    for s, e in crops:
                         slices.append(slice(s, e))
                     lbl = lbl[tuple(slices)]
                     pad_pattern = pads
@@ -675,7 +886,7 @@ class NumpySegmentationFolderDataLoader(DataLoader):
             batch_x = np.stack(proc_imgs, axis=0)
             batch_y = np.stack(proc_lbls, axis=0)
 
-            batch_x = (batch_x - mean) / std
+            batch_x = _normalize_batch(batch_x, self.mean, self.std)
 
             yield {
                 "image": jnp.array(batch_x),
@@ -721,7 +932,8 @@ class HuggingFaceDataLoader(DataLoader):
     ) -> None:
         super().__init__(batch_size, shuffle, drop_last, 0, seed)
         self.hf_id = hf_id
-        self.split = split
+        self.requested_split = normalize_split(split)
+        self.split = resolve_hf_split(hf_id, self.requested_split, data_dir=data_dir)
         self.in_channels = in_channels
         self.image_size = tuple(image_size) if image_size is not None else None
         self.mean = mean
@@ -732,12 +944,14 @@ class HuggingFaceDataLoader(DataLoader):
         try:
             from datasets import load_dataset
         except Exception as e:  # pragma: no cover - runtime optional
-            raise RuntimeError("To use Hugging Face datasets install 'datasets' (pip install datasets)") from e
+            raise RuntimeError(
+                "To use Hugging Face datasets install 'datasets' (pip install datasets)"
+            ) from e
 
         # Load the split (may download the dataset)
-        ds = load_dataset(hf_id, split=split, data_dir=self.data_dir)
+        ds = load_dataset(hf_id, split=self.split, data_dir=self.data_dir)
         # Materialize into memory list for simpler iteration
-        self._examples = [ex for ex in ds]
+        self._examples = list(ds)
         self.num_samples = len(self._examples)
 
         # Try to infer task type from the first example
@@ -783,9 +997,6 @@ class HuggingFaceDataLoader(DataLoader):
         indices = np.arange(self.num_samples)
         if self.shuffle:
             self._rng.shuffle(indices)
-
-        mean = np.array(self.mean).reshape(1, -1, 1, 1) if len(self.mean) == 1 else np.array(self.mean).reshape(1, -1, 1, 1)
-        std = np.array(self.std).reshape(1, -1, 1, 1) if len(self.std) == 1 else np.array(self.std).reshape(1, -1, 1, 1)
 
         for start in range(0, self.num_samples, self.batch_size):
             end = min(start + self.batch_size, self.num_samples)
@@ -836,25 +1047,17 @@ class HuggingFaceDataLoader(DataLoader):
 
             # If channels are last (B, H, W, C) or (B, D, H, W, C), move them to front (B, C, ...)
             if batch_x.ndim >= 4:
-                channels = mean.shape[1]
+                channels = self.in_channels
                 # If channel location is last and doesn't match mean's channel dim, move it
                 if batch_x.shape[-1] == channels and batch_x.shape[1] != channels:
                     batch_x = np.moveaxis(batch_x, -1, 1)
-
-            # Reshape mean/std to match number of spatial dimensions dynamically
-            spatial_dims = batch_x.ndim - 2  # exclude batch and channel dims
-            new_shape = (1, mean.shape[1]) + (1,) * spatial_dims
-            mean = np.array(self.mean).reshape(1, -1)[:, : mean.shape[1]].reshape((1, mean.shape[1]))
-            mean = mean.reshape(new_shape)
-            std = np.array(self.std).reshape(1, -1)[:, : std.shape[1]].reshape((1, std.shape[1]))
-            std = std.reshape(new_shape)
 
             # Normalize and yield
             # Normalization is now handled by the augmentation pipeline (if present)
             # or applied here if no pipeline is used.
             # If self.transform is not None, it is expected to include normalization.
             if self.transform is None:
-                batch_x = (batch_x - mean) / std
+                batch_x = _normalize_batch(batch_x, self.mean, self.std)
 
             if self.transform is not None:
                 key = jax.random.PRNGKey(self._rng.randint(0, 2**31))
@@ -866,9 +1069,19 @@ class HuggingFaceDataLoader(DataLoader):
                 batch_x = jnp.stack(augmented, axis=0)
 
             if self.task == "classification":
-                yield {"image": jnp.array(batch_x) if not isinstance(batch_x, jnp.ndarray) else batch_x, "label": jnp.array(np.array(lbls, dtype=np.int32))}
+                yield {
+                    "image": jnp.array(batch_x)
+                    if not isinstance(batch_x, jnp.ndarray)
+                    else batch_x,
+                    "label": jnp.array(np.array(lbls, dtype=np.int32)),
+                }
             else:
-                yield {"image": jnp.array(batch_x) if not isinstance(batch_x, jnp.ndarray) else batch_x, "label": jnp.array(np.stack(lbls, axis=0))}
+                yield {
+                    "image": jnp.array(batch_x)
+                    if not isinstance(batch_x, jnp.ndarray)
+                    else batch_x,
+                    "label": jnp.array(np.stack(lbls, axis=0)),
+                }
 
     @property
     def dataset_info(self) -> DatasetInfo:
@@ -878,7 +1091,8 @@ class HuggingFaceDataLoader(DataLoader):
             num_train=self.num_samples,
             num_val=0,
             num_test=0,
-            input_shape=(self.in_channels,) + (self.image_size if self.image_size is not None else ()),
+            input_shape=(self.in_channels,)
+            + (self.image_size if self.image_size is not None else ()),
             mean=self.mean,
             std=self.std,
         )
@@ -965,12 +1179,13 @@ class SyntheticSegmentationDataLoader(DataLoader):
             self._rng.shuffle(indices)
 
         for start in range(0, self.num_samples - self.batch_size + 1, self.batch_size):
-            end = start + self.batch_size
             batch_size = self.batch_size
             imgs = self._rng.randn(batch_size, *self.input_shape).astype(np.float32)
             # labels are ints per voxel in [0, num_classes)
             spatial = self.input_shape[1:]
-            lbls = self._rng.randint(0, self.num_classes, size=(batch_size, *spatial)).astype(np.int32)
+            lbls = self._rng.randint(0, self.num_classes, size=(batch_size, *spatial)).astype(
+                np.int32
+            )
             yield {"image": jnp.array(imgs), "label": jnp.array(lbls)}
 
     @property
@@ -989,13 +1204,17 @@ class SyntheticSegmentationDataLoader(DataLoader):
 
 
 def create_data_loader(
-    config: DataConfig, split: str = "train", batch_size: int = 32, pad_to: tuple[int, ...] | None = None
+    config: DataConfig,
+    split: str = "train",
+    batch_size: int = 32,
+    pad_to: tuple[int, ...] | None = None,
 ) -> DataLoader:
     """Create a data loader from configuration."""
     from ndswin.training.augmentation import create_augmentation_pipeline
 
+    normalized_split = normalize_split(split)
     bs = batch_size
-    is_train = (split == "train")
+    is_train = normalized_split == "train"
 
     ds = config.dataset.lower()
     # Certain loaders handle normalization internally (CIFAR, VolumeFolder)
@@ -1014,7 +1233,7 @@ def create_data_loader(
 
     kwargs = {
         "data_dir": config.data_dir,
-        "split": split,
+        "split": normalized_split,
         "batch_size": bs,
         "shuffle": is_train,
         "download": config.download,
@@ -1030,9 +1249,9 @@ def create_data_loader(
         return VolumeFolderDataLoader(
             name=config.dataset,
             data_dir=config.data_dir,
-            split="train" if split in ["train", "val"] else "test",
+            split=normalized_split,
             batch_size=bs,
-            shuffle=(split == "train"),
+            shuffle=is_train,
             seed=config.download if hasattr(config, "download") else 42,
             in_channels=config.in_channels,
             image_size=config.image_size,
@@ -1042,51 +1261,33 @@ def create_data_loader(
         )
     elif ds in {"medseg_msd", "medseg", "medseg_brain_tumour"}:
         # Numpy/NPZ-based segmentation dataset exported by train/fetch_medseg_msd.py
-        from pathlib import Path
-
-        requested_split = "train" if split in ["train", "val"] else "test"
-        split_dir = Path(config.data_dir) / requested_split
-        if not split_dir.exists():
-            # If requested split missing, only allow fallback to 'train' if explicitly enabled
-            train_dir = Path(config.data_dir) / "train"
-            allow_fallback = False
-            try:
-                import os
-                allow_fallback = os.getenv("ALLOW_TEST_SPLIT_FALLBACK", "0").lower() in ("1", "true", "yes")
-            except Exception:
-                allow_fallback = False
-
-            if requested_split == "test" and train_dir.exists() and allow_fallback:
-                print(
-                    f"Warning: {split_dir} not found; ALLOW_TEST_SPLIT_FALLBACK is set, falling back to 'train' split for {split} loader (not recommended)"
-                )
-                requested_split = "train"
-            else:
-                raise FileNotFoundError(
-                    f"Test split not found: {split_dir}.\n"
-                    "Please export the dataset with 'train/fetch_hf_dataset.py --hf-id <HF_ID> --outdir <data_dir>'\n"
-                    "or set ALLOW_TEST_SPLIT_FALLBACK=1 to use the train split for evaluation (not recommended)."
-                )
+        requested_split = resolve_folder_split(
+            config.data_dir,
+            normalized_split,
+            source_name=f"create_data_loader({config.dataset})",
+        )
 
         return NumpySegmentationFolderDataLoader(
             name=config.dataset,
             data_dir=config.data_dir,
             split=requested_split,
             batch_size=bs,
-            shuffle=(split == "train"),
+            shuffle=is_train,
             seed=42,
             in_channels=config.in_channels,
             image_size=config.image_size,
             mean=config.mean,
             std=config.std,
         )
-    elif getattr(config, "hf_id", None) is not None or (isinstance(config.dataset, str) and config.dataset.startswith("hf:")):
+    elif getattr(config, "hf_id", None) is not None or (
+        isinstance(config.dataset, str) and config.dataset.startswith("hf:")
+    ):
         # Use Hugging Face datasets directly. DataConfig can set `hf_id` or set dataset to "hf:<id>".
         hf_id = getattr(config, "hf_id", None) or config.dataset.split("hf:", 1)[1]
         try:
             return HuggingFaceDataLoader(
                 hf_id=hf_id,
-                split="train" if split in ["train", "val"] else "test",
+                split=normalized_split,
                 batch_size=bs,
                 shuffle=is_train,
                 seed=config.download if hasattr(config, "download") else 42,
@@ -1101,16 +1302,29 @@ def create_data_loader(
             msg = str(e)
             # Detect common WebDataset-format archive error from `datasets` loader and fallback
             if "WebDataset" in msg or "TAR archives" in msg or "webdataset" in msg.lower():
-                print(f"Hugging Face dataset {hf_id} appears to be packaged as WebDataset and failed to load via `datasets`. Falling back to exporting via `train/fetch_hf_dataset.py` and using local NPZ loader. Error: {e}")
+                print(
+                    f"Hugging Face dataset {hf_id} appears to be packaged as WebDataset and failed to load via `datasets`. Falling back to exporting via `train/fetch_hf_dataset.py` and using local NPZ loader. Error: {e}"
+                )
                 # Export the dataset to local disk once (per hf_id)
-                outdir = Path("data") / (hf_id.replace("/", "_") if hf_id is not None else "hf_dataset")
+                outdir = Path("data") / (
+                    hf_id.replace("/", "_") if hf_id is not None else "hf_dataset"
+                )
                 if not outdir.exists() or not any(outdir.iterdir()):
-                    cmd = [sys.executable, "train/fetch_hf_dataset.py", "--hf-id", hf_id, "--outdir", str(outdir)]
+                    cmd = [
+                        sys.executable,
+                        "train/fetch_hf_dataset.py",
+                        "--hf-id",
+                        hf_id,
+                        "--outdir",
+                        str(outdir),
+                    ]
                     print("Exporting dataset with:", " ".join(cmd))
                     try:
                         subprocess.check_call(cmd)
                     except subprocess.CalledProcessError as cpe:
-                        print(f"Export failed: {cpe}; falling back to synthetic data loader for testing.")
+                        print(
+                            f"Export failed: {cpe}; falling back to synthetic data loader for testing."
+                        )
                         # Fallback to synthetic data so sweep can continue in environments where HF webdataset isn't supported
                         if getattr(config, "task", "classification") == "segmentation":
                             input_shape = (config.in_channels,) + tuple(config.image_size)
@@ -1136,9 +1350,9 @@ def create_data_loader(
                 return NumpySegmentationFolderDataLoader(
                     name=config.dataset,
                     data_dir=str(outdir),
-                    split="train" if split in ["train", "val"] else "test",
+                    split=normalized_split,
                     batch_size=bs,
-                    shuffle=(split == "train"),
+                    shuffle=is_train,
                     seed=42,
                     in_channels=config.in_channels,
                     image_size=config.image_size,
