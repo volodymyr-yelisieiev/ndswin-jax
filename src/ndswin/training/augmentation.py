@@ -5,7 +5,7 @@ that work with JAX arrays.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, cast
 
 import jax
 import jax.numpy as jnp
@@ -639,12 +639,13 @@ class MixupOrCutmix:
         key1, key2 = jax.random.split(key)
         do_mixup = jax.random.uniform(key1) < self.p
 
-        return jax.lax.cond(
+        mixed = jax.lax.cond(
             do_mixup,
             lambda k: self.mixup(x, y, k),
             lambda k: self.cutmix(x, y, k),
             key2,
         )
+        return cast(tuple[Array, Array], mixed)
 
 
 class Cutout(Transform):

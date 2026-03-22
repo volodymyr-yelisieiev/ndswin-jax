@@ -10,7 +10,6 @@ import pytest
 
 from ndswin.config import DataConfig
 from ndswin.training.data import (
-    DatasetInfo,
     HuggingFaceDataLoader,
     SyntheticDataLoader,
     VolumeFolderDataLoader,

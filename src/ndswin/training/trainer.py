@@ -29,7 +29,7 @@ from ndswin.training.metrics import (
     top_k_accuracy,
 )
 from ndswin.training.optimizer import create_optimizer
-from ndswin.types import Array, Batch, PRNGKey
+from ndswin.types import Array, Batch, MetricValue, PRNGKey
 from ndswin.utils.logging import get_logger
 
 
@@ -118,24 +118,28 @@ def train_step(
     # Split RNG for this step
     dropout_rng, new_dropout_rng = jax.random.split(rng)
 
-    def loss_fn(params: Any) -> tuple[Array, dict[str, Any]]:
+    def loss_fn(params: Any) -> tuple[Array, tuple[dict[str, MetricValue], Array, Any]]:
         """Compute loss and metrics."""
         # Forward pass
         if use_batch_stats:
-            logits, updates = state.apply_fn(
+            outputs = state.apply_fn(
                 {"params": params, "batch_stats": state.batch_stats},
                 images,
                 deterministic=False,
                 mutable=["batch_stats"],
                 rngs={"dropout": dropout_rng},
             )
+            logits, updates = cast(tuple[Array, dict[str, Any]], outputs)
             new_batch_stats = updates["batch_stats"]
         else:
-            logits = state.apply_fn(
-                {"params": params},
-                images,
-                deterministic=False,
-                rngs={"dropout": dropout_rng},
+            logits = cast(
+                Array,
+                state.apply_fn(
+                    {"params": params},
+                    images,
+                    deterministic=False,
+                    rngs={"dropout": dropout_rng},
+                ),
             )
             new_batch_stats = None
 
@@ -149,34 +153,40 @@ def train_step(
             else:
                 lbl_onehot = labels
 
+            loss: Array
             if loss_name == "dice":
-                loss = dice_loss(logits, lbl_onehot)
+                loss = cast(Array, dice_loss(logits, lbl_onehot))
             elif loss_name == "bce":
                 # binary segmentation: use channel 1 logits
                 fg_logits = logits[:, 1, ...]
                 fg_labels = lbl_onehot[:, 1, ...]
-                loss = binary_cross_entropy_with_logits(fg_logits, fg_labels)
+                loss = cast(Array, binary_cross_entropy_with_logits(fg_logits, fg_labels))
             elif loss_name in {"bce_dice", "dice_bce"}:
                 fg_logits = logits[:, 1, ...]
                 fg_labels = lbl_onehot[:, 1, ...]
-                bce = binary_cross_entropy_with_logits(fg_logits, fg_labels)
-                dloss = dice_loss(logits, lbl_onehot)
+                bce = cast(Array, binary_cross_entropy_with_logits(fg_logits, fg_labels))
+                dloss = cast(Array, dice_loss(logits, lbl_onehot))
                 loss = 0.5 * bce + 0.5 * dloss
             else:
                 # default to dice
-                loss = dice_loss(logits, lbl_onehot)
+                loss = cast(Array, dice_loss(logits, lbl_onehot))
 
-            metrics = compute_segmentation_metrics(logits, labels, prefix="train_")
-            metrics["loss"] = loss
-            return loss, (metrics, logits, new_batch_stats)
+            seg_metrics: dict[str, MetricValue] = compute_segmentation_metrics(
+                logits, labels, prefix="train_"
+            )
+            seg_metrics["loss"] = loss
+            return loss, (seg_metrics, logits, new_batch_stats)
 
-        else:
-            # Classification path
-            loss = cast(Array, cross_entropy_loss(logits, labels, label_smoothing))
-            acc = cast(Array, accuracy(logits, labels))
-            top5_acc = cast(Array, top_k_accuracy(logits, labels, k=5))
-            metrics = {"loss": loss, "accuracy": acc, "top5_accuracy": top5_acc}
-            return loss, (metrics, logits, new_batch_stats)
+        # Classification path
+        loss = cast(Array, cross_entropy_loss(logits, labels, label_smoothing))
+        acc = cast(Array, accuracy(logits, labels))
+        top5_acc = cast(Array, top_k_accuracy(logits, labels, k=5))
+        cls_metrics: dict[str, MetricValue] = {
+            "loss": loss,
+            "accuracy": acc,
+            "top5_accuracy": top5_acc,
+        }
+        return loss, (cls_metrics, logits, new_batch_stats)
 
     # Compute gradients
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
@@ -237,35 +247,37 @@ def eval_step(
         else:
             lbl_onehot = labels
 
+        loss: Array
         if loss_name == "dice":
-            loss = dice_loss(logits, lbl_onehot)
+            loss = cast(Array, dice_loss(logits, lbl_onehot))
         elif loss_name == "bce":
             fg_logits = logits[:, 1, ...]
             fg_labels = lbl_onehot[:, 1, ...]
-            loss = binary_cross_entropy_with_logits(fg_logits, fg_labels)
+            loss = cast(Array, binary_cross_entropy_with_logits(fg_logits, fg_labels))
         elif loss_name in {"bce_dice", "dice_bce"}:
             fg_logits = logits[:, 1, ...]
             fg_labels = lbl_onehot[:, 1, ...]
-            bce = binary_cross_entropy_with_logits(fg_logits, fg_labels)
-            dloss = dice_loss(logits, lbl_onehot)
+            bce = cast(Array, binary_cross_entropy_with_logits(fg_logits, fg_labels))
+            dloss = cast(Array, dice_loss(logits, lbl_onehot))
             loss = 0.5 * bce + 0.5 * dloss
         else:
-            loss = dice_loss(logits, lbl_onehot)
+            loss = cast(Array, dice_loss(logits, lbl_onehot))
 
-        metrics = compute_segmentation_metrics(logits, labels, prefix="val_")
-        metrics["loss"] = loss
-        return metrics
+        seg_metrics: dict[str, MetricValue] = compute_segmentation_metrics(
+            logits, labels, prefix="val_"
+        )
+        seg_metrics["loss"] = loss
+        return seg_metrics
 
-    else:
-        loss = cross_entropy_loss(logits, labels)
-        acc = accuracy(logits, labels)
-        top5_acc = top_k_accuracy(logits, labels, k=5)
+    loss = cast(Array, cross_entropy_loss(logits, labels))
+    acc = cast(Array, accuracy(logits, labels))
+    top5_acc = cast(Array, top_k_accuracy(logits, labels, k=5))
 
-        return {
-            "loss": loss,
-            "accuracy": acc,
-            "top5_accuracy": top5_acc,
-        }
+    return {
+        "loss": loss,
+        "accuracy": acc,
+        "top5_accuracy": top5_acc,
+    }
 
 
 class Trainer:
@@ -291,6 +303,7 @@ class Trainer:
         task: str = "classification",
         loss_name: str = "cross_entropy",
         use_tensorboard: bool = False,
+        devices: list[jax.Device] | None = None,
     ) -> None:
         """Initialize trainer.
 
@@ -304,6 +317,8 @@ class Trainer:
             checkpoint_dir: Directory for checkpoints.
             mixup_transform: Optional Mixup transform applied per batch.
             use_tensorboard: Whether to log metrics to TensorBoard in the checkpoint dir.
+            devices: Optional explicit device list to use for training. When omitted,
+                all visible JAX devices are used.
         """
         self.model = model
         self.config = config
@@ -323,14 +338,17 @@ class Trainer:
         self.logger = get_logger("ndswin.training")
 
         # Setup Mesh and Sharding for distributed training
-        self.num_devices = len(jax.devices())
+        self.devices = devices or list(jax.devices())
+        if not self.devices:
+            raise RuntimeError("No JAX devices available for training")
+        self.num_devices = len(self.devices)
         self.logger.info("Using %d device(s) for data-parallel training", self.num_devices)
-        # We shard over 'batch' dimension using all available local devices
-        self.mesh = Mesh(jax.devices(), axis_names=('batch',))
+        # We shard over 'batch' dimension using the configured local devices
+        self.mesh = Mesh(self.devices, axis_names=("batch",))
         # Replicated sharding for weights/state
         self.replicated_sharding = NamedSharding(self.mesh, P())
         # Data parallel sharding for input batches (shard on first dim)
-        self.dp_sharding = NamedSharding(self.mesh, P('batch'))
+        self.dp_sharding = NamedSharding(self.mesh, P("batch"))
 
         # Checkpoint manager
         self.checkpoint_manager = None
@@ -344,6 +362,7 @@ class Trainer:
         self.tb_writer = None
         if use_tensorboard and checkpoint_dir is not None:
             from torch.utils.tensorboard import SummaryWriter
+
             self.tb_writer = SummaryWriter(log_dir=str(checkpoint_dir))
 
         # Callbacks
@@ -542,10 +561,10 @@ class Trainer:
         history: dict[str, list[float]] = {}
 
         # Early stopping state
-        early_stop = getattr(self.config, 'early_stopping', False)
-        patience = getattr(self.config, 'patience', 10)
-        min_delta = getattr(self.config, 'min_delta', 0.0001)
-        best_val_metric = -float('inf')
+        early_stop = getattr(self.config, "early_stopping", False)
+        patience = getattr(self.config, "patience", 10)
+        min_delta = getattr(self.config, "min_delta", 0.0001)
+        best_val_metric = -float("inf")
         epochs_without_improvement = 0
 
         self.logger.info("Starting training for %d epochs", num_epochs)
@@ -636,7 +655,9 @@ class Trainer:
                 if self.task == "segmentation":
                     current_metric = val_metrics.get("dice", val_metrics.get("val_dice", 0.0))
                 else:
-                    current_metric = val_metrics.get("accuracy", val_metrics.get("val_accuracy", 0.0))
+                    current_metric = val_metrics.get(
+                        "accuracy", val_metrics.get("val_accuracy", 0.0)
+                    )
                 if current_metric > best_val_metric + min_delta:
                     best_val_metric = current_metric
                     epochs_without_improvement = 0

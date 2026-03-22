@@ -6,6 +6,8 @@ and dimensionalities.
 
 import math
 import os
+import subprocess
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
@@ -15,13 +17,10 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import numpy as np
-import subprocess
-import sys
 
 from ndswin.config import DataConfig
 from ndswin.types import Batch
 from ndswin.utils.logging import get_logger
-
 
 logger = get_logger("data")
 
@@ -75,16 +74,16 @@ def resolve_folder_split(
     opt-in via ``ALLOW_TEST_SPLIT_FALLBACK``.
     """
     normalized_split = normalize_split(split)
-    available_dirs = {
-        path.name for path in Path(data_dir).iterdir() if path.is_dir()
-    } if Path(data_dir).exists() else set()
+    available_dirs = (
+        {path.name for path in Path(data_dir).iterdir() if path.is_dir()}
+        if Path(data_dir).exists()
+        else set()
+    )
 
     if normalized_split == "train":
         if "train" in available_dirs:
             return "train"
-        raise FileNotFoundError(
-            f"{source_name}: train split directory not found under {data_dir}."
-        )
+        raise FileNotFoundError(f"{source_name}: train split directory not found under {data_dir}.")
 
     if normalized_split == "validation":
         if "validation" in available_dirs:
@@ -149,7 +148,9 @@ def resolve_hf_split(hf_id: str, split: str, *, data_dir: str | None = None) -> 
     try:
         from datasets import get_dataset_split_names
     except Exception as e:  # pragma: no cover - runtime optional
-        raise RuntimeError("To use Hugging Face datasets install 'datasets' (pip install datasets)") from e
+        raise RuntimeError(
+            "To use Hugging Face datasets install 'datasets' (pip install datasets)"
+        ) from e
 
     available_splits = set(get_dataset_split_names(hf_id, data_dir=data_dir) or [])
 
@@ -293,7 +294,8 @@ def _normalize_batch(
     num_spatial_dims = batch_x.ndim - 2
     mean_array = _reshape_channel_stats(mean, num_channels, num_spatial_dims)
     std_array = _reshape_channel_stats(std, num_channels, num_spatial_dims)
-    return (batch_x - mean_array) / std_array
+    normalized = (batch_x - mean_array) / std_array
+    return np.asarray(normalized, dtype=batch_x.dtype)
 
 
 class CIFARDataLoader(DataLoader):
@@ -328,7 +330,7 @@ class CIFARDataLoader(DataLoader):
 
         # Implement 90/10 train/val split for CIFAR if needed
         if self.split in ["train", "validation"]:
-            val_size = 5000 if self.num_classes == 10 else 5000 # 10% of 50k
+            val_size = 5000 if self.num_classes == 10 else 5000  # 10% of 50k
             if self.split == "validation":
                 self.x = self.x[-val_size:]
                 self.y = self.y[-val_size:]
@@ -1004,8 +1006,8 @@ class HuggingFaceDataLoader(DataLoader):
                 break
 
             batch_indices = indices[start:end]
-            imgs = []
-            lbls = []
+            imgs: list[np.ndarray] = []
+            lbls: list[Any] = []
             for i in batch_indices:
                 ex = self._examples[i]
                 # Try common image keys used across HF datasets

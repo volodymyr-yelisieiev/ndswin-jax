@@ -12,7 +12,7 @@ def test_get_available_gpus_success(mock_check_output):
     """Test successful parsing of nvidia-smi results."""
     mock_check_output.side_effect = [
         b"",  # which nvidia-smi check
-        "0, 15000, 10\n1, 2000, 90\n2, [Not Supported], 40\n3, 8000, 45\n"
+        "0, 15000, 10\n1, 2000, 90\n2, [Not Supported], 40\n3, 8000, 45\n",
     ]
 
     # Needs 4MB free, under 50%
@@ -29,10 +29,7 @@ def test_get_available_gpus_success(mock_check_output):
 
 @mock.patch("subprocess.check_output")
 def test_get_available_gpus_not_supported_util(mock_check_output):
-    mock_check_output.side_effect = [
-        b"",
-        "0, 8000, [Not Supported]\n"
-    ]
+    mock_check_output.side_effect = [b"", "0, 8000, [Not Supported]\n"]
     # It should assume 0% if util is "[Not Supported]"
     gpus = get_available_gpus(min_free_mb=4000, max_utilization=50)
     assert gpus == [0]

@@ -1,8 +1,6 @@
 """Tests for result protection and safety features."""
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -49,6 +47,7 @@ class TestQueueResultTimestamping:
         """Test that queue result files have timestamp in name."""
         # Simulate what the queue runner would create
         from datetime import datetime
+
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_path = tmp_path / f"queue_{stamp}.json"
         results_path.write_text(json.dumps([{"name": "test", "status": "dry"}]))
@@ -60,7 +59,6 @@ class TestQueueResultTimestamping:
 
     def test_multiple_runs_dont_overwrite(self, tmp_path: Path):
         """Test that multiple queue runs create separate result files."""
-        import time
         from datetime import datetime
 
         files = []
@@ -79,7 +77,7 @@ class TestLoggingSetup:
 
     def test_setup_logging_with_file_path(self, tmp_path: Path):
         """Test setup_logging with a specific file path."""
-        from ndswin.utils.logging import setup_logging, get_logger
+        from ndswin.utils.logging import get_logger, setup_logging
 
         log_file = tmp_path / "subdir" / "test.log"
         setup_logging(level="INFO", log_file=str(log_file), use_rich=False)
@@ -93,8 +91,9 @@ class TestLoggingSetup:
 
     def test_setup_logging_without_file(self, tmp_path: Path):
         """Test setup_logging with log_to_file=False."""
-        from ndswin.utils.logging import setup_logging
         import logging
+
+        from ndswin.utils.logging import setup_logging
 
         setup_logging(level="INFO", log_to_file=False, use_rich=False)
 

@@ -8,9 +8,6 @@ import jax.numpy as jnp
 import pytest
 
 from ndswin.utils.device import (
-    CPU,
-    GPU,
-    TPU,
     DeviceInfo,
     clear_caches,
     device_put_sharded,
@@ -33,8 +30,10 @@ def test_device_info_dataclass():
     """Test DeviceInfo dataclass formatting."""
     info = DeviceInfo(device_type="cpu", device_id=0, platform="cpu", device_kind="mock_cpu")
     assert str(info) == "CPU:0 (mock_cpu)"
-    
-    info_with_mem = DeviceInfo(device_type="gpu", device_id=1, platform="gpu", device_kind="A100", memory_bytes=42949672960)
+
+    info_with_mem = DeviceInfo(
+        device_type="gpu", device_id=1, platform="gpu", device_kind="A100", memory_bytes=42949672960
+    )
     assert str(info_with_mem) == "GPU:1 (A100, 40.0GB)"
 
 
@@ -43,7 +42,7 @@ def test_get_device_info():
     info = get_device_info()
     assert isinstance(info, DeviceInfo)
     assert info.device_type in ("cpu", "gpu", "tpu")
-    
+
     devices = get_all_devices()
     info2 = get_device_info(devices[0])
     assert info.device_id == info2.device_id
@@ -60,7 +59,7 @@ def test_get_devices_by_type():
     """Test getting devices by type."""
     cpu_devices = get_devices_by_type("cpu")
     assert len(cpu_devices) >= 1
-    
+
     if is_gpu_available():
         gpu_devices = get_devices_by_type("gpu")
         assert len(gpu_devices) >= 1
@@ -154,7 +153,7 @@ def test_device_put_sharded():
     arrays = [jnp.array([i]) for i in range(len(devices))]
     sharded = device_put_sharded(arrays)
     assert len(sharded) == len(devices)
-    
+
     with pytest.raises(ValueError, match="Number of arrays"):
         # Guarantee a mismatch by passing one more array than the number of devices
         device_put_sharded([jnp.array([1])] * (len(devices) + 1))

@@ -8,7 +8,6 @@ into the training pipeline.
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 from ndswin.config import DataConfig
 from ndswin.training.augmentation import (
@@ -16,7 +15,7 @@ from ndswin.training.augmentation import (
     MixupOrCutmix,
     create_augmentation_pipeline,
 )
-from ndswin.training.data import create_data_loader, SyntheticDataLoader
+from ndswin.training.data import SyntheticDataLoader, create_data_loader
 
 
 class TestAugmentationPipelineWiring:

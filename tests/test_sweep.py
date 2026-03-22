@@ -65,8 +65,14 @@ def test_run_sweep_full_run_passes_loaded_sweep_config(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
     sentinel_exp = SimpleNamespace()
 
-    monkeypatch.setattr(run_sweep, "load_base_experiment", lambda path: SimpleNamespace(model=SimpleNamespace(embed_dim=96, num_heads=(3, 6, 12, 24))))
-    monkeypatch.setattr(run_sweep, "materialize_experiment", lambda base_exp, sampled, budget: sentinel_exp)
+    monkeypatch.setattr(
+        run_sweep,
+        "load_base_experiment",
+        lambda path: SimpleNamespace(model=SimpleNamespace(embed_dim=96, num_heads=(3, 6, 12, 24))),
+    )
+    monkeypatch.setattr(
+        run_sweep, "materialize_experiment", lambda base_exp, sampled, budget: sentinel_exp
+    )
 
     def fake_run_trial(trial_idx, exp, out_dir, dry_run=False, sweep_config=None):
         captured["trial_idx"] = trial_idx

@@ -128,7 +128,9 @@ def setup_logging(
             resolved_path = Path(log_file)
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            resolved_path = Path(_log_config.log_dir) / f"{_log_config.filename_prefix}_{timestamp}.log"
+            resolved_path = (
+                Path(_log_config.log_dir) / f"{_log_config.filename_prefix}_{timestamp}.log"
+            )
         file_handler = logging.FileHandler(resolved_path)
         file_handler.setFormatter(logging.Formatter(_log_config.format_string))
         root_logger.addHandler(file_handler)

@@ -224,7 +224,7 @@ class MetricTracker:
 
     def update(
         self,
-        metrics: dict[str, float],
+        metrics: dict[str, MetricValue],
         count: int = 1,
     ) -> None:
         """Update metrics with new values.
@@ -362,7 +362,9 @@ def dice_coefficient_from_probs(probs: Array, labels_onehot: Array, smooth: floa
     return jnp.mean(dice, axis=0)
 
 
-def compute_segmentation_metrics(logits: Array, labels: Array, prefix: str = "") -> dict[str, float]:
+def compute_segmentation_metrics(
+    logits: Array, labels: Array, prefix: str = ""
+) -> dict[str, MetricValue]:
     """Compute segmentation metrics: mean Dice and voxel-wise accuracy.
 
     Args:
@@ -398,7 +400,7 @@ def compute_segmentation_metrics(logits: Array, labels: Array, prefix: str = "")
 
     voxel_acc = jnp.mean(preds == true_labels)
 
-    metrics = {
+    metrics: dict[str, MetricValue] = {
         f"{prefix}dice": mean_dice,
         f"{prefix}voxel_accuracy": voxel_acc,
     }

@@ -1,6 +1,5 @@
 """Tests for data pipeline stability, GPU safety, and naming consistency."""
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -17,8 +16,10 @@ class TestProcessImageScaling:
         # so we test the method via a mock-like approach.
         class FakeLoader:
             image_size = None
+
             def _process_image(self, img):
                 return HuggingFaceDataLoader._process_image(self, img)
+
         return FakeLoader()
 
     def test_uint8_scaled_to_01(self):
@@ -62,9 +63,7 @@ class TestBatchPadding:
 
     def test_pad_batch_divisible(self):
         from ndswin.training.trainer import Trainer
-        from ndswin.config import TrainingConfig
 
-        config = TrainingConfig(batch_size=8, num_classes=10)
         # Minimal model mock — we only need _pad_batch which doesn't use model
         trainer = Trainer.__new__(Trainer)
         trainer.num_devices = 4
@@ -111,6 +110,7 @@ class TestStampNaming:
 
     def test_no_double_hf_prefix(self):
         from ndswin.config import ExperimentConfig
+
         exp = ExperimentConfig(name="cifar10")
         stamp = exp.get_stamp()
         # Should NOT contain "hf" at all since name is "cifar10"
@@ -120,6 +120,7 @@ class TestStampNaming:
 
     def test_hf_prefix_stripped(self):
         from ndswin.config import ExperimentConfig
+
         exp = ExperimentConfig(name="hf_cifar10")
         stamp = exp.get_stamp()
         # Should still be clean and removed prefix
@@ -128,6 +129,7 @@ class TestStampNaming:
 
     def test_stamp_has_timestamp(self):
         from ndswin.config import ExperimentConfig
+
         exp = ExperimentConfig(name="test")
         stamp = exp.get_stamp()
         # Should contain a timestamp-like pattern
@@ -140,15 +142,12 @@ class TestCifar100DataRange:
 
     def test_cifar10_loader_normalized_range(self):
         """Test that native CIFAR loader outputs data roughly in [-2.5, 2.5] (ImageNet norm)."""
-        from ndswin.config import DataConfig
         from ndswin.training.data import HuggingFaceDataLoader
+
         try:
-            config = DataConfig(
-                dataset="cifar10",
-                download=True,
-                data_dir="data/cifar10",
+            loader = HuggingFaceDataLoader(
+                hf_id="cifar10", split="train", batch_size=4, shuffle=False
             )
-            loader = HuggingFaceDataLoader(hf_id="cifar10", split="train", batch_size=4, shuffle=False)
             batch = next(iter(loader))
             img = np.array(batch["image"])
             # After normalization with CIFAR mean/std, values should be roughly in [-3, 3]

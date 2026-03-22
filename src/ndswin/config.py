@@ -601,7 +601,9 @@ class DataConfig:
             elif len(self.mean) == 3 and self.in_channels == 1:
                 self.mean = (self.mean[0],)
             else:
-                raise ValueError(f"mean must have {self.in_channels} elements, got {len(self.mean)}")
+                raise ValueError(
+                    f"mean must have {self.in_channels} elements, got {len(self.mean)}"
+                )
         if len(self.std) != self.in_channels:
             if len(self.std) == 1:
                 self.std = tuple(self.std[0] for _ in range(self.in_channels))
@@ -655,8 +657,8 @@ class ExperimentConfig:
 
     def get_config_hash(self) -> str:
         """Return a short hash for the configuration for reproducible naming."""
-        import json
         import hashlib
+        import json
 
         config_str = json.dumps(self.to_dict(), sort_keys=True)
         return hashlib.md5(config_str.encode()).hexdigest()[:8]
@@ -670,7 +672,7 @@ class ExperimentConfig:
         # Strip common prefixes that add redundancy
         for prefix in ("hf_", "hf:"):
             if name.startswith(prefix):
-                name = name[len(prefix):]
+                name = name[len(prefix) :]
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{name}_{self.get_config_hash()}_{timestamp}"
 

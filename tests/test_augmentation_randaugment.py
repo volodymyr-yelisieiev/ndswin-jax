@@ -1,8 +1,5 @@
 """Tests for RandAugment integration and Mixup/CutMix activation."""
 
-import pytest
-import numpy as np
-
 
 def test_auto_augment_config_field():
     """Verify DataConfig accepts the auto_augment field."""

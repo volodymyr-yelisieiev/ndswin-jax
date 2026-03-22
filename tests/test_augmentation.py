@@ -18,7 +18,6 @@ from ndswin.training.augmentation import (
     RandomHorizontalFlip,
     RandomRotation,
     RandomVerticalFlip,
-    create_augmentation_pipeline,
 )
 
 
@@ -40,11 +39,11 @@ def prng_key():
 def test_random_horizontal_flip(dummy_img_2d, prng_key):
     """Test horizontal flip on 2D images."""
     transform = RandomHorizontalFlip(p=1.0)
-    
+
     # Deterministic
     out_det = transform(dummy_img_2d)
     assert out_det.shape == dummy_img_2d.shape
-    
+
     # Random
     out_rand = transform(dummy_img_2d, prng_key)
     assert out_rand.shape == dummy_img_2d.shape
@@ -60,11 +59,11 @@ def test_random_vertical_flip(dummy_img_2d, prng_key):
 def test_random_crop(dummy_img_2d, prng_key):
     """Test random crop with padding."""
     transform = RandomCrop(size=(16, 16), padding=(4, 4))
-    
+
     # Center crop (deterministic)
     out_center = transform(dummy_img_2d)
     assert out_center.shape == (3, 16, 16)
-    
+
     # Random crop
     out_rand = transform(dummy_img_2d, prng_key)
     assert out_rand.shape == (3, 16, 16)
@@ -74,13 +73,13 @@ def test_normalize_denormalize(dummy_img_2d):
     """Test normalization and its inverse."""
     mean = (0.5, 0.5, 0.5)
     std = (0.2, 0.2, 0.2)
-    
+
     norm = Normalize(mean=mean, std=std)
     denorm = Denormalize(mean=mean, std=std)
-    
+
     x_norm = norm(dummy_img_2d)
     assert not jnp.allclose(x_norm, dummy_img_2d)
-    
+
     x_denorm = denorm(x_norm)
     assert jnp.allclose(x_denorm, dummy_img_2d)
 
@@ -102,10 +101,10 @@ def test_color_jitter(dummy_img_2d, prng_key):
 def test_mixup(prng_key):
     """Test mixup augmentation."""
     mixup = Mixup(alpha=1.0, num_classes=10)
-    
+
     x = jnp.ones((4, 3, 32, 32))
     y = jnp.array([0, 1, 2, 3])
-    
+
     x_mixed, y_mixed = mixup(x, y, prng_key)
     assert x_mixed.shape == x.shape
     assert y_mixed.shape == (4, 10)
@@ -114,10 +113,10 @@ def test_mixup(prng_key):
 def test_cutmix(prng_key):
     """Test cutmix augmentation."""
     cutmix = Cutmix(alpha=1.0, num_classes=10)
-    
+
     x = jnp.ones((4, 3, 32, 32))
     y = jnp.array([0, 1, 2, 3])
-    
+
     x_mixed, y_mixed = cutmix(x, y, prng_key)
     assert x_mixed.shape == x.shape
     assert y_mixed.shape == (4, 10)
@@ -126,10 +125,10 @@ def test_cutmix(prng_key):
 def test_mixup_or_cutmix(prng_key):
     """Test combined mixup/cutmix wrapper."""
     transform = MixupOrCutmix(p=0.5, num_classes=10)
-    
+
     x = jnp.ones((4, 3, 32, 32))
     y = jnp.array([0, 1, 2, 3])
-    
+
     x_mixed, y_mixed = transform(x, y, prng_key)
     assert x_mixed.shape == x.shape
     assert y_mixed.shape == (4, 10)
@@ -144,11 +143,8 @@ def test_cutout(dummy_img_2d, prng_key):
 
 def test_compose(dummy_img_2d, prng_key):
     """Test composition of multiple transforms."""
-    transform = Compose([
-        RandomCrop(size=(16, 16)),
-        RandomHorizontalFlip(p=1.0)
-    ])
-    
+    transform = Compose([RandomCrop(size=(16, 16)), RandomHorizontalFlip(p=1.0)])
+
     out = transform(dummy_img_2d, prng_key)
     assert out.shape == (3, 16, 16)
 
@@ -156,8 +152,7 @@ def test_compose(dummy_img_2d, prng_key):
 def test_vectorized_batch_augmentation():
     """Test the new vectorized batch augmentation in CIFARDataLoader."""
     from ndswin.training.data import CIFARDataLoader
-    import numpy as np
-    
+
     # Mock DataLoader for testing augmentation
     class MockCIFARLoader(CIFARDataLoader):
         def _load_data(self):
@@ -167,21 +162,26 @@ def test_vectorized_batch_augmentation():
         @property
         def dataset_info(self):
             from ndswin.training.data import DatasetInfo
+
             return DatasetInfo("mock", 10, 1000, 100, 100, (3, 32, 32), (0.5,), (0.5,))
 
     loader = MockCIFARLoader(
-        name="test", data_dir="tmp", split="train", 
-        batch_size=4, shuffle=False, transform=lambda x, k: x
+        name="test",
+        data_dir="tmp",
+        split="train",
+        batch_size=4,
+        shuffle=False,
+        transform=lambda x, k: x,
     )
-    
+
     batch = np.random.randn(4, 3, 32, 32).astype(np.float32)
-    
+
     # Test RandomCrop (vectorized)
     loader._do_random_crop = True
     aug_batch = loader._augment_batch(batch)
     assert aug_batch.shape == batch.shape
-    assert not np.array_equal(aug_batch, batch) # Should be cropped/shifted
-    
+    assert not np.array_equal(aug_batch, batch)  # Should be cropped/shifted
+
     # Test Flip (vectorized)
     loader._do_random_crop = False
     aug_batch = loader._augment_batch(batch)

@@ -120,7 +120,7 @@ def binary_cross_entropy_with_logits(
 
     Args:
         logits: Predicted logits of shape (B, ...) or (B, num_labels).
-        labels: Ground truth labels. If labels.ndim < logits.ndim, it will be 
+        labels: Ground truth labels. If labels.ndim < logits.ndim, it will be
             reshaped to match (e.g. for broadcasting batch-level labels over spatial).
         pos_weight: Positive class weight for handling imbalance.
 

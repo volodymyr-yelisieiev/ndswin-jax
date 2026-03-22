@@ -15,10 +15,10 @@ from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 try:
-    import yaml
+    import yaml  # type: ignore[import-untyped]
 except Exception:  # pragma: no cover - optional dependency at runtime
     yaml = None
 
@@ -80,6 +80,12 @@ def add_train_override_arguments(parser: argparse.ArgumentParser) -> None:
         help="Cap the number of training steps per epoch",
     )
     parser.add_argument(
+        "--max-devices",
+        type=int,
+        default=None,
+        help="Limit training to at most this many visible JAX devices",
+    )
+    parser.add_argument(
         "--stamp",
         type=str,
         default=None,
@@ -109,12 +115,21 @@ def parse_json_override(value: str) -> Any:
 
 
 class ParseOverrideAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        overrides = getattr(namespace, self.dest, None)
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        overrides = cast(list[tuple[str, Any]] | None, getattr(namespace, self.dest, None))
         if overrides is None:
             overrides = []
-        key, raw_value = values
-        overrides.append((key, parse_json_override(raw_value)))
+        if values is None or isinstance(values, str) or len(values) != 2:
+            raise ValueError("Override action expects a key/value pair.")
+        key = values[0]
+        raw_value = values[1]
+        overrides.append((str(key), parse_json_override(str(raw_value))))
         setattr(namespace, self.dest, overrides)
 
 
@@ -165,14 +180,14 @@ def configure_logging(
     )
 
 
-def load_experiment_config(config_path: str):
+def load_experiment_config(config_path: str) -> Any:
     from .config import ExperimentConfig
 
     path = Path(config_path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
 
-    config_dict = json.loads(path.read_text())
+    config_dict = cast(dict[str, Any], json.loads(path.read_text()))
     if "dataset" in config_dict and "data" not in config_dict:
         config_dict["data"] = config_dict.pop("dataset")
     if "augmentation" in config_dict:
@@ -219,7 +234,7 @@ def setup_output_dirs(
     return checkpoint_dir, log_file
 
 
-def load_training_runtime():
+def load_training_runtime() -> tuple[Any, Any, Any, Any]:
     """Import training runtime dependencies lazily.
 
     This keeps GPU selection logic ahead of any JAX-backed imports so
@@ -372,6 +387,10 @@ def run_train_command(args: argparse.Namespace) -> int:
             num_classes=num_classes,
         )
 
+    devices = None
+    if args.max_devices is not None:
+        devices = list(jax.devices())[: args.max_devices]
+
     trainer = Trainer(
         model=model,
         config=train_config,
@@ -383,6 +402,7 @@ def run_train_command(args: argparse.Namespace) -> int:
         loss_name=getattr(exp_config.training, "loss", "cross_entropy"),
         mixup_transform=mixup_transform,
         use_tensorboard=True,
+        devices=devices,
     )
 
     train_logger.info("=" * 70)
@@ -443,9 +463,9 @@ def load_sweep(path: str) -> dict[str, Any]:
     if sweep_path.suffix in (".yaml", ".yml"):
         if yaml is None:
             raise RuntimeError("PyYAML is required to load YAML sweep files. Install pyyaml.")
-        return yaml.safe_load(sweep_path.read_text())
+        return cast(dict[str, Any], yaml.safe_load(sweep_path.read_text()))
     if sweep_path.suffix == ".json":
-        return json.loads(sweep_path.read_text())
+        return cast(dict[str, Any], json.loads(sweep_path.read_text()))
     raise ValueError("Unsupported sweep file format. Use .yaml/.yml or .json")
 
 
@@ -462,11 +482,11 @@ def sample_value(spec: dict[str, Any]) -> Any:
     raise ValueError(f"Unknown sampling kind: {kind}")
 
 
-def materialize_experiment(base, sampled: dict[str, Any], budget_epochs: int):
+def materialize_experiment(base: Any, sampled: dict[str, Any], budget_epochs: int) -> Any:
     from .config import NDSwinConfig
 
     exp = deepcopy(base)
-    apply_path_overrides(exp, sampled.items())
+    apply_path_overrides(exp, list(sampled.items()))
     exp.training.epochs = int(budget_epochs)
     exp.training.warmup_epochs = min(int(exp.training.warmup_epochs), exp.training.epochs // 10)
 
@@ -515,7 +535,7 @@ def materialize_experiment(base, sampled: dict[str, Any], budget_epochs: int):
     return exp
 
 
-def load_base_experiment(path: str | None):
+def load_base_experiment(path: str | None) -> Any:
     from .config import ExperimentConfig, NDSwinConfig
 
     if path is None:
@@ -531,7 +551,7 @@ def load_base_experiment(path: str | None):
         cfg.name = "cifar10_sweep_base"
         return cfg
 
-    exp_raw = json.loads(Path(path).read_text())
+    exp_raw = cast(dict[str, Any], json.loads(Path(path).read_text()))
     exp_dict: dict[str, Any] = {"name": exp_raw.get("name", "sweep_base")}
     if "model" in exp_raw:
         exp_dict["model"] = exp_raw["model"]
@@ -594,7 +614,7 @@ def build_cli_invocation(
 
 def run_trial(
     trial_idx: int,
-    exp,
+    exp: Any,
     out_dir: Path,
     dry_run: bool = False,
     sweep_config: dict[str, Any] | None = None,
@@ -777,14 +797,16 @@ def run_sweep_command(args: argparse.Namespace) -> int:
     for idx in range(trials):
         max_attempts = 10
         exp = None
-        sampled: dict[str, Any] = {}
+        trial_sampled: dict[str, Any]
         for attempt in range(max_attempts):
-            sampled = {key: sample_value(spec) for key, spec in space.items()}
-            if "model.embed_dim" in sampled and isinstance(sampled["model.embed_dim"], str):
+            trial_sampled = {key: sample_value(spec) for key, spec in space.items()}
+            if "model.embed_dim" in trial_sampled and isinstance(
+                trial_sampled["model.embed_dim"], str
+            ):
                 with suppress(ValueError):
-                    sampled["model.embed_dim"] = int(float(sampled["model.embed_dim"]))
+                    trial_sampled["model.embed_dim"] = int(float(trial_sampled["model.embed_dim"]))
             try:
-                exp = materialize_experiment(base_exp, sampled, budget)
+                exp = materialize_experiment(base_exp, trial_sampled, budget)
                 _ = exp.model
                 break
             except Exception as exc:
@@ -852,7 +874,7 @@ def run_sweep_command(args: argparse.Namespace) -> int:
 def get_best_trial_from_summary(summary_path: Path) -> dict[str, Any]:
     if not summary_path.exists():
         raise FileNotFoundError(f"Sweep summary not found at {summary_path}")
-    summary = json.loads(summary_path.read_text())
+    summary = cast(list[dict[str, Any]], json.loads(summary_path.read_text()))
     if not summary:
         raise ValueError(f"Sweep summary is empty: {summary_path}")
     valid_trials = [trial for trial in summary if trial.get("status") not in {"error", "dry"}]
@@ -1157,13 +1179,13 @@ def run_queue_command(args: argparse.Namespace) -> int:
             logger.error("Stopping queue due to job failure (--stop-on-error)")
             break
 
-    completed = sum(1 for result in results if result["status"] == "completed")
+    completed_count = sum(1 for result in results if result["status"] == "completed")
     failed = sum(1 for result in results if result["status"] in {"failed", "error"})
     dry = sum(1 for result in results if result["status"] == "dry")
     logger.info("=" * 80)
     logger.info("QUEUE COMPLETE")
     logger.info("=" * 80)
-    logger.info("Completed: %d/%d", completed, len(jobs))
+    logger.info("Completed: %d/%d", completed_count, len(jobs))
     if failed:
         logger.warning("Failed: %d/%d", failed, len(jobs))
     if dry:
@@ -1172,7 +1194,7 @@ def run_queue_command(args: argparse.Namespace) -> int:
     return 0 if failed == 0 or not args.stop_on_error else 1
 
 
-def point_cloud_to_voxel(points, resolution: int = 32):
+def point_cloud_to_voxel(points: Any, resolution: int = 32) -> Any:
     import numpy as np
 
     p_min = points.min(axis=0)
@@ -1199,7 +1221,7 @@ def save_classification(out_dir: Path, split: str, idx: int, image: Any, label: 
     np.savez_compressed(class_dir / f"{idx:05d}.npz", image=image_array)
 
 
-def save_segmentation(out_dir: Path, split: str, case_id: str, image, label) -> None:
+def save_segmentation(out_dir: Path, split: str, case_id: str, image: Any, label: Any) -> None:
     import numpy as np
 
     image_dir = out_dir / split / "images"
@@ -1408,6 +1430,7 @@ def run_validate_command(args: argparse.Namespace) -> int:
             seed=None,
             data_dir=None,
             max_steps_per_epoch=args.max_steps_per_epoch,
+            max_devices=args.max_devices,
             stamp=args.stamp,
             no_log_file=args.no_log_file,
             log_level=args.log_level,
@@ -1521,6 +1544,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Cap steps per epoch during validation training",
+    )
+    validate_parser.add_argument(
+        "--max-devices",
+        type=int,
+        default=1,
+        help="Limit validation smoke training to at most this many visible JAX devices",
     )
     validate_parser.add_argument("--skip-tests", action="store_true", help="Skip pytest execution")
     validate_parser.add_argument("--skip-train", action="store_true", help="Skip smoke training")

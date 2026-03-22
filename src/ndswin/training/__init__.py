@@ -2,8 +2,8 @@
 
 from ndswin.training.augmentation import (
     Compose,
-    Cutout,
     Cutmix,
+    Cutout,
     Mixup,
     MixupOrCutmix,
     Normalize,
@@ -18,8 +18,8 @@ from ndswin.training.data import (
     CIFAR10DataLoader,
     CIFAR100DataLoader,
     DataLoader,
-    SyntheticDataLoader,
     NumpySegmentationFolderDataLoader,
+    SyntheticDataLoader,
     create_data_loader,
 )
 from ndswin.training.losses import (
@@ -30,8 +30,8 @@ from ndswin.training.losses import (
 from ndswin.training.metrics import (
     MetricTracker,
     accuracy,
-    top_k_accuracy,
     compute_segmentation_metrics,
+    top_k_accuracy,
 )
 from ndswin.training.optimizer import (
     create_learning_rate_schedule,
