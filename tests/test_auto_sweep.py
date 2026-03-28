@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 import pytest
-from train.auto_sweep_and_train import get_best_trial_from_summary
+
+from ndswin.cli import get_best_trial_from_summary
 
 
 def test_get_best_trial_accuracy(tmp_path: Path):
@@ -53,6 +54,35 @@ def test_get_best_trial_loss(tmp_path: Path):
     best = get_best_trial_from_summary(summary_path)
     assert best["trial"] == 1
     assert best["loss"] == 0.4
+
+
+def test_get_best_trial_respects_explicit_metric(tmp_path: Path):
+    summary_path = tmp_path / "summary.json"
+    data = [
+        {"trial": 0, "status": "done", "val_accuracy": 0.9, "val_top5_accuracy": 0.92},
+        {"trial": 1, "status": "done", "val_accuracy": 0.8, "val_top5_accuracy": 0.98},
+    ]
+    summary_path.write_text(json.dumps(data))
+
+    best = get_best_trial_from_summary(summary_path, metric="val_top5_accuracy")
+    assert best["trial"] == 1
+    assert best["val_top5_accuracy"] == 0.98
+
+
+def test_get_best_trial_reads_metric_from_summary_payload(tmp_path: Path):
+    summary_path = tmp_path / "summary.json"
+    payload = {
+        "metric": "val_top5_accuracy",
+        "results": [
+            {"trial": 0, "status": "done", "val_accuracy": 0.9, "val_top5_accuracy": 0.92},
+            {"trial": 1, "status": "done", "val_accuracy": 0.8, "val_top5_accuracy": 0.98},
+        ],
+    }
+    summary_path.write_text(json.dumps(payload))
+
+    best = get_best_trial_from_summary(summary_path)
+    assert best["trial"] == 1
+    assert best["val_top5_accuracy"] == 0.98
 
 
 def test_get_best_trial_empty_or_missing(tmp_path: Path):

@@ -1,0 +1,43 @@
+{
+  "name": "modelnet40",
+  "description": "ModelNet40 3D voxel classification example (40 classes, 32^3 voxels)",
+  "model": {
+    "num_dims": 3,
+    "patch_size": [2, 2, 2],
+    "embed_dim": 48,
+    "depths": [2, 2, 6, 2],
+    "num_heads": [3, 6, 12, 24],
+    "window_size": [4, 4, 4],
+    "in_channels": 1,
+    "num_classes": 40,
+    "drop_rate": 0.1,
+    "drop_path_rate": 0.2
+  },
+  "training": {
+    "epochs": 200,
+    "batch_size": 16,
+    "learning_rate": 0.0005,
+    "weight_decay": 0.05,
+    "optimizer": "adamw",
+    "lr_schedule": "cosine",
+    "warmup_epochs": 20,
+    "label_smoothing": 0.1,
+    "gradient_clip_norm": 1.0,
+    "early_stopping": true,
+    "patience": 20,
+    "min_delta": 0.0001
+  },
+  "data": {
+    "dataset": "volume_folder",
+    "data_dir": "data/modelnet40",
+    "image_size": [32, 32, 32],
+    "in_channels": 1,
+    "task": "classification",
+    "augmentation": true,
+    "random_crop": false,
+    "random_flip": true,
+    "normalize": true,
+    "mean": [0.5],
+    "std": [0.5]
+  }
+}

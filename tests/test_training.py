@@ -1,5 +1,7 @@
 """Tests for training infrastructure."""
 
+from types import SimpleNamespace
+
 import jax
 import jax.numpy as jnp
 
@@ -241,3 +243,54 @@ class TestOptimizer:
         # Should be an Optax optimizer
         assert hasattr(optimizer, "init")
         assert hasattr(optimizer, "update")
+
+
+class TestTrainerBestState:
+    """Tests for restoring the best validation state."""
+
+    def test_fit_restores_best_validation_state(self):
+        from ndswin.training.trainer import Trainer
+        from ndswin.utils.logging import get_logger
+
+        class FakeLoader:
+            def reset(self):
+                return None
+
+        trainer = Trainer.__new__(Trainer)
+        trainer.config = SimpleNamespace(
+            num_epochs=3, early_stopping=True, patience=5, min_delta=0.0
+        )
+        trainer.state = {"epoch_marker": jnp.array(0)}
+        trainer.step = 0
+        trainer.epoch = 0
+        trainer.logger = get_logger("tests.best_state")
+        trainer.callbacks = []
+        trainer.tb_writer = None
+        trainer.task = "classification"
+        trainer.best_state = None
+        trainer.best_epoch = None
+        trainer.best_metric_name = None
+        trainer.best_metric_value = None
+        trainer.best_metrics = None
+
+        scores = iter([0.4, 0.8, 0.6])
+        epoch_markers = iter([1, 2, 3])
+
+        def fake_train_epoch(loader, num_steps=None):
+            trainer.state = {"epoch_marker": jnp.array(next(epoch_markers))}
+            return {"loss": 1.0, "accuracy": 0.5}
+
+        def fake_evaluate(loader, num_steps=None):
+            return {"loss": 1.0, "accuracy": next(scores)}
+
+        trainer.train_epoch = fake_train_epoch
+        trainer.evaluate = fake_evaluate
+
+        trainer.fit(FakeLoader(), FakeLoader(), num_epochs=3)
+
+        assert int(trainer.state["epoch_marker"]) == 2
+        assert trainer.best_epoch == 2
+        assert trainer.best_metric_name == "val_accuracy"
+        assert trainer.best_metric_value == 0.8
+        assert trainer.best_metrics is not None
+        assert trainer.best_metrics["accuracy"] == 0.8

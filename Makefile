@@ -54,7 +54,8 @@ help:
 	@echo "★ Quick Start:"
 	@echo "  conda env create --prefix ./$(CONDA_PREFIX_DIR) -f environment.yml"
 	@echo "  conda activate ./$(CONDA_PREFIX_DIR)"
-	@echo "  optimize           One-command: fetch data → sweep → train best (THE recommended workflow)"
+	@echo "  ndswin ...         Canonical workflow surface (make remains a thin shortcut layer)"
+	@echo "  optimize           High-level shortcut: fetch data → sweep → train best"
 	@echo "  validate           Smoke test: 2-epoch train + tests to verify pipeline health"
 	@echo ""
 	@echo "Environment:"
@@ -63,17 +64,17 @@ help:
 	@echo "Training:"
 	@echo "  train              Train (CONFIG=path/to/config.json)"
 	@echo "  train-bg           Train in background (nohup)"
-	@echo "  train-tmux         Train in detached tmux session"
+	@echo "  train-tmux         Optional tmux wrapper for train"
 	@echo ""
 	@echo "Sweeps:"
 	@echo "  sweep              Run hyperparameter sweep (SWEEP=path/to/sweep.yaml)"
-	@echo "  sweep-tmux         Run sweep in tmux"
+	@echo "  sweep-tmux         Optional tmux wrapper for sweep"
 	@echo "  auto-sweep         Sweep + train best config"
-	@echo "  auto-sweep-tmux    Auto-sweep in tmux"
+	@echo "  auto-sweep-tmux    Optional tmux wrapper for auto-sweep"
 	@echo ""
 	@echo "Queue:"
 	@echo "  queue              Run job queue (QUEUE_FILE=path/to/queue.yaml)"
-	@echo "  queue-tmux         Run queue in tmux"
+	@echo "  queue-tmux         Optional tmux wrapper for queue"
 	@echo ""
 	@echo "Data:"
 	@echo "  fetch-data         Fetch HF dataset (HF_DATASET=cifar10 DATASET_DIR=data/cifar10)"
@@ -81,7 +82,7 @@ help:
 	@echo ""
 	@echo "Monitoring:"
 	@echo "  tensorboard        Launch TensorBoard on outputs/"
-	@echo "  show-best          Show best trial from latest sweep results"
+	@echo "  show-best          Show best trial per sweep summary"
 	@echo "  status             Show running tmux sessions"
 	@echo ""
 	@echo "Development:"
@@ -104,9 +105,9 @@ help:
 	@echo "  make optimize SWEEP_TRIALS=5 TRAIN_EPOCHS=50          # Quick optimization"
 	@echo "  make train CONFIG=configs/cifar10.json"
 	@echo "  make sweep SWEEP=configs/sweeps/cifar10_hyperparam_sweep.yaml SWEEP_TRIALS=10"
-	@echo "  make auto-sweep SWEEP=configs/sweeps/modelnet10_hyperparam_sweep.yaml TRAIN_EPOCHS=50"
-	@echo "  make fetch-data HF_DATASET=jxie/modelnet40 DATASET_DIR=data/modelnet10"
-	@echo "  make queue-tmux QUEUE_FILE=configs/queues/queue_2d_3d.yaml"
+	@echo "  make auto-sweep SWEEP=configs/sweeps/modelnet40_hyperparam_sweep.yaml TRAIN_EPOCHS=50"
+	@echo "  make fetch-data HF_DATASET=jxie/modelnet40 DATASET_DIR=data/modelnet40"
+	@echo "  make queue QUEUE_FILE=configs/queues/queue_2d_3d.yaml"
 	@echo "  make tensorboard"
 
 print-env-resolution:
@@ -121,7 +122,7 @@ print-env-resolution:
 	@echo "sphinx=$(SPHINX)"
 
 # =============================================================================
-# ★ One-Command Optimization (the recommended workflow)
+# ★ One-command optimization shortcut over `ndswin auto-sweep`
 # =============================================================================
 optimize:
 	@echo "══════════════════════════════════════════════════════════════════════"
@@ -204,7 +205,7 @@ train-tmux:
 	@CONFIG_NAME=$$(basename $(CONFIG) .json); \
 	STAMP="$${CONFIG_NAME}_$$(date +%Y%m%d_%H%M%S)"; \
 	SESSION="train_$${STAMP}"; \
-	LOG="logs/$${STAMP}.log"; mkdir -p logs; \
+	LOG_DIR="logs/tmux/train"; LOG="$${LOG_DIR}/$${STAMP}.log"; mkdir -p "$${LOG_DIR}"; \
 	echo "Starting tmux session: $${SESSION}"; \
 	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(NDSWIN) train --config $(CONFIG) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
 	echo "Attach: tmux attach -t $${SESSION}"; \
@@ -222,7 +223,7 @@ sweep:
 sweep-tmux:
 	@if [ ! -f "$(SWEEP)" ]; then echo "Error: Sweep not found: $(SWEEP)"; exit 1; fi
 	@STAMP=$$(date +%Y%m%d_%H%M%S); \
-	SESSION="sweep_$${STAMP}"; LOG="logs/sweep_$${STAMP}.log"; mkdir -p logs; \
+	SESSION="sweep_$${STAMP}"; LOG_DIR="logs/tmux/sweep"; LOG="$${LOG_DIR}/sweep_$${STAMP}.log"; mkdir -p "$${LOG_DIR}"; \
 	echo "Starting sweep in tmux: $${SESSION}"; \
 	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(NDSWIN) sweep --sweep $(SWEEP) $(TRIALS_ARG) --outdir $(SWEEP_OUTDIR) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
 	echo "Attach: tmux attach -t $${SESSION}"; echo "Log: $${LOG}"
@@ -235,7 +236,7 @@ auto-sweep:
 auto-sweep-tmux:
 	@if [ ! -f "$(SWEEP)" ]; then echo "Error: Sweep not found: $(SWEEP)"; exit 1; fi
 	@STAMP=$$(date +%Y%m%d_%H%M%S); \
-	SESSION="autosweep_$${STAMP}"; LOG="logs/autosweep_$${STAMP}.log"; mkdir -p logs; \
+	SESSION="autosweep_$${STAMP}"; LOG_DIR="logs/tmux/auto_sweep"; LOG="$${LOG_DIR}/autosweep_$${STAMP}.log"; mkdir -p "$${LOG_DIR}"; \
 	echo "Starting auto-sweep in tmux: $${SESSION}"; \
 	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(NDSWIN) auto-sweep --sweep $(SWEEP) $(TRIALS_ARG) --train-epochs $(TRAIN_EPOCHS) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
 	echo "Attach: tmux attach -t $${SESSION}"; echo "Log: $${LOG}"
@@ -251,7 +252,7 @@ queue:
 queue-tmux:
 	@if [ ! -f "$(QUEUE_FILE)" ]; then echo "Error: Queue not found: $(QUEUE_FILE)"; exit 1; fi
 	@STAMP=$$(date +%Y%m%d_%H%M%S); \
-	SESSION="queue_$${STAMP}"; LOG="logs/queue_$${STAMP}.log"; mkdir -p logs; \
+	SESSION="queue_$${STAMP}"; LOG_DIR="logs/tmux/queue"; LOG="$${LOG_DIR}/queue_$${STAMP}.log"; mkdir -p "$${LOG_DIR}"; \
 	echo "Starting queue in tmux: $${SESSION}"; \
 	tmux new -d -s "$${SESSION}" "cd $(shell pwd) && $(HF_ENV) $(NDSWIN) queue --queue $(QUEUE_FILE) $(EXTRA_ARGS) 2>&1 | tee '$${LOG}'; exec bash"; \
 	echo "Attach: tmux attach -t $${SESSION}"; echo "Log: $${LOG}"

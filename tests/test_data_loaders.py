@@ -10,11 +10,13 @@ import pytest
 
 from ndswin.config import DataConfig
 from ndswin.training.data import (
+    CIFAR10DataLoader,
     HuggingFaceDataLoader,
     SyntheticDataLoader,
     VolumeFolderDataLoader,
     create_data_loader,
     normalize_split,
+    write_dataset_manifest,
 )
 
 
@@ -103,6 +105,36 @@ def test_create_data_loader_huggingface(monkeypatch):
 
     # Check normalization boundaries roughly (should be mean 0 if input was 0 and we map roughly)
     assert loader_train.dataset_info.name == "cifar10"
+
+
+def test_cifar_validation_loader_uses_train_source_split(monkeypatch):
+    """CIFAR validation should come from the train split, not a nonexistent validation split."""
+
+    calls = []
+
+    def fake_load_dataset(hf_id, split, data_dir=None):
+        calls.append({"hf_id": hf_id, "split": split, "data_dir": data_dir})
+        return [
+            {
+                "img": np.zeros((4, 4, 3), dtype=np.uint8),
+                "label": idx % 10,
+            }
+            for idx in range(5001)
+        ]
+
+    fake_datasets = types.SimpleNamespace(load_dataset=fake_load_dataset)
+    monkeypatch.setitem(sys.modules, "datasets", fake_datasets)
+
+    loader = CIFAR10DataLoader(
+        data_dir="data",
+        split="validation",
+        batch_size=2,
+        shuffle=False,
+        download=False,
+    )
+
+    assert calls[-1]["split"] == "train"
+    assert loader.num_samples == 5000
 
 
 def test_huggingface_loader_segmentation(monkeypatch):
@@ -217,6 +249,99 @@ def test_huggingface_loader_falls_back_from_validation_with_warning(monkeypatch,
     assert "using 'val' instead" in caplog.text
 
 
+def test_huggingface_loader_uses_requested_split_when_metadata_lookup_fails(monkeypatch, caplog):
+    """HF loader should keep working when split metadata lookup is unavailable."""
+
+    calls = []
+
+    def fake_load_dataset(hf_id, split, data_dir=None):
+        calls.append({"hf_id": hf_id, "split": split, "data_dir": data_dir})
+        return [
+            {
+                "image": np.zeros((8, 8, 3), dtype=np.uint8),
+                "label": idx % 2,
+            }
+            for idx in range(4)
+        ]
+
+    fake_module = types.SimpleNamespace(
+        load_dataset=fake_load_dataset,
+        get_dataset_split_names=lambda hf_id, data_dir=None: (_ for _ in ()).throw(
+            RuntimeError("offline")
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "datasets", fake_module)
+
+    with caplog.at_level(logging.WARNING):
+        loader = HuggingFaceDataLoader(
+            hf_id="dummy/dataset",
+            split="train",
+            batch_size=2,
+            image_size=(3, 8, 8),
+        )
+
+    assert loader.split == "train"
+    assert calls[-1]["split"] == "train"
+    assert "without metadata validation" in caplog.text
+
+
+def test_huggingface_loader_uses_test_fallback_when_validation_metadata_lookup_fails(
+    monkeypatch, caplog
+):
+    """HF loader should use explicit validation fallback even when metadata lookup is offline."""
+
+    calls = []
+
+    def fake_load_dataset(hf_id, split, data_dir=None):
+        calls.append({"hf_id": hf_id, "split": split, "data_dir": data_dir})
+        return [
+            {
+                "image": np.zeros((8, 8, 3), dtype=np.uint8),
+                "label": idx % 2,
+            }
+            for idx in range(4)
+        ]
+
+    fake_module = types.SimpleNamespace(
+        load_dataset=fake_load_dataset,
+        get_dataset_split_names=lambda hf_id, data_dir=None: (_ for _ in ()).throw(
+            RuntimeError("offline")
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "datasets", fake_module)
+    monkeypatch.setenv("ALLOW_VALIDATION_SPLIT_FALLBACK", "1")
+
+    with caplog.at_level(logging.WARNING):
+        loader = HuggingFaceDataLoader(
+            hf_id="dummy/dataset",
+            split="validation",
+            batch_size=2,
+            image_size=(3, 8, 8),
+        )
+
+    assert loader.split == "test"
+    assert calls[-1]["split"] == "test"
+    assert "using 'test' because ALLOW_VALIDATION_SPLIT_FALLBACK is enabled" in caplog.text
+
+
+def test_huggingface_loader_wraps_dataset_load_errors(monkeypatch):
+    """HF loader should raise a stable, user-facing dataset load error."""
+
+    fake_module = types.SimpleNamespace(
+        load_dataset=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("offline")),
+        get_dataset_split_names=lambda hf_id, data_dir=None: ["train"],
+    )
+    monkeypatch.setitem(sys.modules, "datasets", fake_module)
+
+    with pytest.raises(RuntimeError, match="network/download availability"):
+        HuggingFaceDataLoader(
+            hf_id="dummy/dataset",
+            split="train",
+            batch_size=2,
+            image_size=(3, 8, 8),
+        )
+
+
 def test_create_data_loader_hf_routes_test_split(monkeypatch):
     """create_data_loader should stop remapping evaluation splits for HF datasets."""
     calls = _install_fake_datasets_module(monkeypatch, ["train", "validation", "test"])
@@ -280,3 +405,71 @@ def test_volume_folder_loader_validation_fallback_is_explicit(tmp_path, monkeypa
     assert isinstance(loader, VolumeFolderDataLoader)
     assert loader.split == "test"
     assert "falling back to 'test'" in caplog.text
+
+
+def test_volume_folder_loader_reports_split_counts_from_manifest(tmp_path):
+    """Volume folder metadata should report real split counts instead of zeros."""
+    for split_name, class_name in (
+        ("train", "chair"),
+        ("train", "table"),
+        ("validation", "chair"),
+        ("test", "table"),
+    ):
+        _make_volume_class_dir(tmp_path, split_name, class_name=class_name)
+
+    write_dataset_manifest(
+        tmp_path,
+        {
+            "task": "classification",
+            "num_classes": 2,
+            "class_to_idx": {"chair": 0, "table": 1},
+            "split_counts": {"train": 2, "validation": 1, "test": 1},
+        },
+    )
+
+    loader = VolumeFolderDataLoader(
+        name="volume_folder",
+        data_dir=str(tmp_path),
+        split="train",
+        batch_size=1,
+        in_channels=1,
+        image_size=(4, 4, 4),
+        mean=(0.0,),
+        std=(1.0,),
+    )
+
+    assert loader.dataset_info.num_train == 2
+    assert loader.dataset_info.num_val == 1
+    assert loader.dataset_info.num_test == 1
+
+
+def test_volume_folder_loader_uses_manifest_class_mapping_across_splits(tmp_path):
+    """Validation labels should follow the dataset-wide manifest ordering."""
+    _make_volume_class_dir(tmp_path, "train", class_name="chair")
+    _make_volume_class_dir(tmp_path, "train", class_name="table")
+    _make_volume_class_dir(tmp_path, "validation", class_name="table")
+
+    write_dataset_manifest(
+        tmp_path,
+        {
+            "task": "classification",
+            "num_classes": 2,
+            "class_to_idx": {"chair": 0, "table": 1},
+            "split_counts": {"train": 2, "validation": 1},
+        },
+    )
+
+    loader = VolumeFolderDataLoader(
+        name="volume_folder",
+        data_dir=str(tmp_path),
+        split="validation",
+        batch_size=1,
+        in_channels=1,
+        image_size=(4, 4, 4),
+        mean=(0.0,),
+        std=(1.0,),
+    )
+
+    assert loader.class_to_idx["chair"] == 0
+    assert loader.class_to_idx["table"] == 1
+    assert loader.labels == [1]

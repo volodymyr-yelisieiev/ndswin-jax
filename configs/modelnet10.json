@@ -1,6 +1,6 @@
 {
   "name": "modelnet10",
-  "description": "ModelNet10 3D voxel classification (10 classes, 32^3 voxels)",
+  "description": "True ModelNet10 3D voxel classification template (10 classes, 32^3 voxels)",
   "model": {
     "num_dims": 3,
     "patch_size": [2, 2, 2],

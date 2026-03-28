@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
+import importlib
 import json
 import math
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -17,12 +20,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
+from .utils.logging import get_logger, setup_logging
+
+yaml: Any | None
 try:
-    import yaml  # type: ignore[import-untyped]
+    yaml = importlib.import_module("yaml")
 except Exception:  # pragma: no cover - optional dependency at runtime
     yaml = None
-
-from .utils.logging import get_logger, setup_logging
 
 logger = get_logger("ndswin.cli")
 DEFAULT_LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
@@ -234,6 +238,23 @@ def setup_output_dirs(
     return checkpoint_dir, log_file
 
 
+def validate_experiment_dataset_contract(
+    exp_config: Any, *, require_validation_split: bool = False
+) -> dict[str, Any] | None:
+    """Validate dataset/model compatibility before launching any work."""
+    from .training.data import validate_dataset_contract
+
+    model_num_classes = getattr(exp_config.model, "num_classes", None)
+    if model_num_classes is not None:
+        exp_config.training.num_classes = int(model_num_classes)
+
+    return validate_dataset_contract(
+        exp_config.data,
+        expected_num_classes=model_num_classes,
+        require_validation_split=require_validation_split,
+    )
+
+
 def load_training_runtime() -> tuple[Any, Any, Any, Any]:
     """Import training runtime dependencies lazily.
 
@@ -251,14 +272,25 @@ def run_train_command(args: argparse.Namespace) -> int:
     from .utils.gpu import setup_optimal_gpus
 
     setup_optimal_gpus()
+
+    exp_config = load_experiment_config(args.config)
+    apply_train_overrides(exp_config, args)
+
+    configure_logging(args.log_level, log_to_file=False)
+    try:
+        dataset_contract = validate_experiment_dataset_contract(
+            exp_config,
+            require_validation_split=True,
+        )
+    except Exception as exc:
+        logger.error("Dataset/config validation failed: %s", exc)
+        return 1
+
     SwinForSegmentation, NDSwinTransformer, Trainer, create_data_loader = load_training_runtime()
 
     import jax
     import jax.numpy as jnp
     import numpy as np
-
-    exp_config = load_experiment_config(args.config)
-    apply_train_overrides(exp_config, args)
 
     checkpoint_dir, log_file = setup_output_dirs(exp_config, args.config, stamp=args.stamp)
     configure_logging(
@@ -278,6 +310,8 @@ def run_train_command(args: argparse.Namespace) -> int:
     train_logger.info("Checkpoint dir: %s", checkpoint_dir)
     train_logger.info("Log file: %s", log_file)
     train_logger.info("Timestamp: %s", datetime.now().isoformat())
+    if dataset_contract is not None and isinstance(dataset_contract.get("num_classes"), int):
+        train_logger.info("Dataset classes: %d", dataset_contract["num_classes"])
 
     rng = jax.random.PRNGKey(exp_config.training.seed)
     np.random.seed(exp_config.training.seed)
@@ -338,35 +372,38 @@ def run_train_command(args: argparse.Namespace) -> int:
         pad_to = None
 
     dataset_name = getattr(exp_config.data, "dataset", "unknown")
-    train_loader = create_data_loader(
-        config=exp_config.data,
-        split="train",
-        batch_size=exp_config.training.batch_size,
-        pad_to=pad_to,
-    )
     try:
+        train_loader = create_data_loader(
+            config=exp_config.data,
+            split="train",
+            batch_size=exp_config.training.batch_size,
+            pad_to=pad_to,
+        )
         val_loader = create_data_loader(
             config=exp_config.data,
             split="validation",
             batch_size=exp_config.training.batch_size,
             pad_to=pad_to,
         )
-    except Exception:
-        try:
-            val_loader = create_data_loader(
-                config=exp_config.data,
-                split="test",
-                batch_size=exp_config.training.batch_size,
-                pad_to=pad_to,
-            )
-        except Exception as exc:
-            train_logger.warning("Could not load validation or test split: %s", exc)
-            val_loader = None
+    except Exception as exc:
+        train_logger.error("Failed to create required data loaders: %s", exc)
+        return 1
 
+    split_counts = dataset_contract.get("split_counts") if dataset_contract is not None else None
     if hasattr(train_loader, "dataset_info"):
         train_logger.info("  Dataset: %s", train_loader.dataset_info.name)
-        train_logger.info("  Train samples: %s", train_loader.dataset_info.num_train)
-        train_logger.info("  Test samples: %s", train_loader.dataset_info.num_test)
+        if isinstance(split_counts, dict):
+            train_logger.info("  Train samples: %s", split_counts.get("train", 0))
+            train_logger.info(
+                "  Validation samples: %s",
+                split_counts.get("validation", split_counts.get("val", 0)),
+            )
+            train_logger.info("  Test samples: %s", split_counts.get("test", 0))
+        else:
+            dataset_info = train_loader.dataset_info
+            train_logger.info("  Train samples: %s", getattr(dataset_info, "num_train", 0))
+            train_logger.info("  Validation samples: %s", getattr(dataset_info, "num_val", 0))
+            train_logger.info("  Test samples: %s", getattr(dataset_info, "num_test", 0))
     else:
         train_logger.info("  Dataset: %s", dataset_name)
 
@@ -414,24 +451,21 @@ def run_train_command(args: argparse.Namespace) -> int:
     total_time = time.time() - start_time
 
     final_metrics: dict[str, Any] = {}
-    if val_loader is not None:
-        val_loader.reset()
-        final_metrics = trainer.evaluate(val_loader)
-        train_logger.info("=" * 70)
-        train_logger.info("Final Validation Results:")
-        train_logger.info("=" * 70)
-        train_logger.info("  Loss: %.4f", final_metrics["loss"])
-        if task == "segmentation":
-            train_logger.info("  Dice: %.4f", final_metrics.get("val_dice", 0.0))
-            train_logger.info("  Voxel Acc: %.4f", final_metrics.get("val_voxel_accuracy", 0.0))
-        else:
-            train_logger.info("  Accuracy: %.4f", final_metrics["accuracy"])
-            train_logger.info("  Top-5 Accuracy: %.4f", final_metrics["top5_accuracy"])
+    val_loader.reset()
+    final_metrics = trainer.evaluate(val_loader)
+    train_logger.info("=" * 70)
+    train_logger.info("Final Validation Results (best-restored state):")
+    train_logger.info("=" * 70)
+    train_logger.info("  Loss: %.4f", final_metrics["loss"])
+    if task == "segmentation":
+        train_logger.info("  Dice: %.4f", final_metrics.get("val_dice", 0.0))
+        train_logger.info("  Voxel Acc: %.4f", final_metrics.get("val_voxel_accuracy", 0.0))
+    else:
+        train_logger.info("  Accuracy: %.4f", final_metrics["accuracy"])
+        train_logger.info("  Top-5 Accuracy: %.4f", final_metrics["top5_accuracy"])
 
     metrics_file = checkpoint_dir / "metrics.json"
-    final_metrics_data: dict[str, float | None] = {
-        "loss": float(final_metrics["loss"]) if val_loader else None
-    }
+    final_metrics_data: dict[str, float | None] = {"loss": float(final_metrics["loss"])}
     if task == "segmentation":
         final_metrics_data["val_dice"] = float(final_metrics.get("val_dice", 0.0))
         final_metrics_data["val_voxel_accuracy"] = float(
@@ -444,6 +478,10 @@ def run_train_command(args: argparse.Namespace) -> int:
     metrics_data = {
         "config": exp_config.to_dict(),
         "final_metrics": final_metrics_data,
+        "best_epoch": trainer.best_epoch,
+        "best_metric_name": trainer.best_metric_name,
+        "best_metric_value": trainer.best_metric_value,
+        "best_metrics": trainer.best_metrics,
         "training_time_seconds": total_time,
         "num_parameters": num_params,
         "history": {key: [float(value) for value in values] for key, values in history.items()},
@@ -488,7 +526,11 @@ def materialize_experiment(base: Any, sampled: dict[str, Any], budget_epochs: in
     exp = deepcopy(base)
     apply_path_overrides(exp, list(sampled.items()))
     exp.training.epochs = int(budget_epochs)
-    exp.training.warmup_epochs = min(int(exp.training.warmup_epochs), exp.training.epochs // 10)
+    if hasattr(exp.training, "warmup_epochs"):
+        exp.training.warmup_epochs = max(
+            0,
+            min(int(exp.training.warmup_epochs), int(exp.training.epochs)),
+        )
 
     if getattr(exp.data, "dataset", "").lower() == "cifar100":
         exp.training.num_classes = 100
@@ -533,6 +575,53 @@ def materialize_experiment(base: Any, sampled: dict[str, Any], budget_epochs: in
         raise ValueError(f"Invalid model configuration after sampling: {exc}") from exc
 
     return exp
+
+
+def build_sweep_summary_payload(
+    results: list[dict[str, Any]],
+    *,
+    sweep: dict[str, Any],
+    trials: int,
+    budget_epochs: int,
+    outdir: Path,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Build a sweep summary payload with selection metadata."""
+    return {
+        "metric": sweep.get("metric"),
+        "trials": trials,
+        "budget_epochs": budget_epochs,
+        "output_dir": str(outdir),
+        "mode": "dry-run" if dry_run else "run",
+        "results": results,
+    }
+
+
+def write_sweep_summary(
+    path: Path,
+    results: list[dict[str, Any]],
+    *,
+    sweep: dict[str, Any],
+    trials: int,
+    budget_epochs: int,
+    outdir: Path,
+    dry_run: bool,
+) -> None:
+    """Write a sweep summary payload to disk."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            build_sweep_summary_payload(
+                results,
+                sweep=sweep,
+                trials=trials,
+                budget_epochs=budget_epochs,
+                outdir=outdir,
+                dry_run=dry_run,
+            ),
+            indent=2,
+        )
+    )
 
 
 def load_base_experiment(path: str | None) -> Any:
@@ -788,12 +877,33 @@ def run_sweep_command(args: argparse.Namespace) -> int:
                 "stamp": stamp,
             }
             summary.append(result)
-            (base_dir / "summary.json").write_text(json.dumps(summary, indent=2))
-            (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
+            write_sweep_summary(
+                base_dir / "summary.json",
+                summary,
+                sweep=sweep,
+                trials=trials,
+                budget_epochs=budget,
+                outdir=outdir,
+                dry_run=True,
+            )
+            write_sweep_summary(
+                outdir / "summary.json",
+                summary,
+                sweep=sweep,
+                trials=trials,
+                budget_epochs=budget,
+                outdir=outdir,
+                dry_run=True,
+            )
         logger.info("Dry-run complete. Summary written to %s", base_dir / "summary.json")
         return 0
 
     base_exp = load_base_experiment(base_cfg_path)
+    try:
+        validate_experiment_dataset_contract(base_exp, require_validation_split=True)
+    except Exception as exc:
+        logger.error("Dataset/config validation failed before sweep start: %s", exc)
+        return 1
     for idx in range(trials):
         max_attempts = 10
         exp = None
@@ -822,7 +932,15 @@ def run_sweep_command(args: argparse.Namespace) -> int:
             )
             logger.warning("%s", err_msg)
             summary.append({"trial": idx, "status": "error", "error": err_msg})
-            (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
+            write_sweep_summary(
+                outdir / "summary.json",
+                summary,
+                sweep=sweep,
+                trials=trials,
+                budget_epochs=budget,
+                outdir=outdir,
+                dry_run=False,
+            )
             continue
 
         try:
@@ -834,8 +952,15 @@ def run_sweep_command(args: argparse.Namespace) -> int:
                 / result.get("stamp", "stamp")
                 / "summary.json"
             )
-            summary_path.parent.mkdir(parents=True, exist_ok=True)
-            summary_path.write_text(json.dumps(summary, indent=2))
+            write_sweep_summary(
+                summary_path,
+                summary,
+                sweep=sweep,
+                trials=trials,
+                budget_epochs=budget,
+                outdir=outdir,
+                dry_run=False,
+            )
         except Exception as exc:  # pragma: no cover - depends on runtime
             logger.error("Trial %d failed with exception: %s", idx, exc)
             trial_dir = outdir / f"trial_{idx:03d}"
@@ -855,9 +980,24 @@ def run_sweep_command(args: argparse.Namespace) -> int:
         summary_path = (
             outdir / last.get("dataset", "_global") / last.get("stamp", "_global") / "summary.json"
         )
-        summary_path.parent.mkdir(parents=True, exist_ok=True)
-        summary_path.write_text(json.dumps(summary, indent=2))
-        (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
+        write_sweep_summary(
+            summary_path,
+            summary,
+            sweep=sweep,
+            trials=trials,
+            budget_epochs=budget,
+            outdir=outdir,
+            dry_run=False,
+        )
+        write_sweep_summary(
+            outdir / "summary.json",
+            summary,
+            sweep=sweep,
+            trials=trials,
+            budget_epochs=budget,
+            outdir=outdir,
+            dry_run=False,
+        )
 
         try:
             import jax
@@ -871,25 +1011,62 @@ def run_sweep_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def get_best_trial_from_summary(summary_path: Path) -> dict[str, Any]:
+def metric_direction(metric_name: str) -> str:
+    metric_lower = metric_name.lower()
+    if metric_lower.endswith("loss") or metric_lower == "loss":
+        return "min"
+    return "max"
+
+
+def get_best_trial_from_summary(
+    summary_path: Path,
+    *,
+    metric: str | None = None,
+) -> dict[str, Any]:
     if not summary_path.exists():
         raise FileNotFoundError(f"Sweep summary not found at {summary_path}")
-    summary = cast(list[dict[str, Any]], json.loads(summary_path.read_text()))
+    raw_summary = json.loads(summary_path.read_text())
+    if isinstance(raw_summary, dict):
+        summary = cast(list[dict[str, Any]], raw_summary.get("results", []))
+        metric = metric or cast(str | None, raw_summary.get("metric"))
+    else:
+        summary = cast(list[dict[str, Any]], raw_summary)
     if not summary:
         raise ValueError(f"Sweep summary is empty: {summary_path}")
     valid_trials = [trial for trial in summary if trial.get("status") not in {"error", "dry"}]
     if not valid_trials:
         raise ValueError(f"No successful trials found in sweep summary: {summary_path}")
 
-    if "val_dice" in valid_trials[0]:
-        metric = "val_dice"
-        best_trial = max(valid_trials, key=lambda trial: trial.get(metric, 0.0))
+    if metric is not None:
+        selected_metric = metric
+        metric_trials = [trial for trial in valid_trials if selected_metric in trial]
+        if not metric_trials:
+            raise ValueError(
+                f"Metric '{selected_metric}' not present in sweep summary: {summary_path}"
+            )
+        if metric_direction(selected_metric) == "min":
+            best_trial = min(
+                metric_trials,
+                key=lambda trial: trial.get(selected_metric, float("inf")),
+            )
+        else:
+            best_trial = max(
+                metric_trials,
+                key=lambda trial: trial.get(selected_metric, float("-inf")),
+            )
+        metric = selected_metric
+    elif "val_dice" in valid_trials[0]:
+        metric_name = "val_dice"
+        best_trial = max(valid_trials, key=lambda trial: trial.get(metric_name, 0.0))
+        metric = metric_name
     elif "val_accuracy" in valid_trials[0]:
-        metric = "val_accuracy"
-        best_trial = max(valid_trials, key=lambda trial: trial.get(metric, 0.0))
+        metric_name = "val_accuracy"
+        best_trial = max(valid_trials, key=lambda trial: trial.get(metric_name, 0.0))
+        metric = metric_name
     else:
-        metric = "loss"
-        best_trial = min(valid_trials, key=lambda trial: trial.get(metric, float("inf")))
+        metric_name = "loss"
+        best_trial = min(valid_trials, key=lambda trial: trial.get(metric_name, float("inf")))
+        metric = metric_name
     logger.info(
         "Best trial found: Trial %s with %s = %.4f",
         best_trial.get("trial"),
@@ -911,17 +1088,22 @@ def resolve_sweep_output_dir(sweep_path: str, explicit_outdir: str | None) -> Pa
 
 def run_auto_sweep_command(args: argparse.Namespace) -> int:
     configure_logging(args.log_level)
+    sweep_config = load_sweep(args.sweep)
+    selection_metric = cast(str | None, sweep_config.get("metric"))
+    planned_trials = args.trials or sweep_config.get("trials", 20)
     logger.info("=" * 80)
     logger.info("AUTOMATED SWEEP AND TRAIN WORKFLOW")
     logger.info("=" * 80)
     logger.info("1. Sweeping config: %s", args.sweep)
-    logger.info("2. Number of trials: %d", args.trials)
+    logger.info("2. Number of trials: %d", planned_trials)
     logger.info("3. Final training epochs: %d", args.train_epochs)
     logger.info("-" * 80)
 
-    sweep_cmd = build_cli_invocation("sweep", "--sweep", args.sweep, "--trials", str(args.trials))
+    sweep_cmd = build_cli_invocation("sweep", "--sweep", args.sweep)
     if args.base_config:
         sweep_cmd.extend(["--base-config", args.base_config])
+    if args.trials is not None:
+        sweep_cmd.extend(["--trials", str(args.trials)])
     if args.outdir:
         sweep_cmd.extend(["--outdir", args.outdir])
     if args.seed is not None:
@@ -944,7 +1126,7 @@ def run_auto_sweep_command(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        best_trial = get_best_trial_from_summary(summary_path)
+        best_trial = get_best_trial_from_summary(summary_path, metric=selection_metric)
     except Exception as exc:
         logger.error("Error parsing sweep summary: %s", exc)
         return 1
@@ -1194,6 +1376,44 @@ def run_queue_command(args: argparse.Namespace) -> int:
     return 0 if failed == 0 or not args.stop_on_error else 1
 
 
+def canonicalize_label_token(label: Any) -> str:
+    """Convert arbitrary labels into a deterministic string token."""
+    if hasattr(label, "item"):
+        with suppress(Exception):
+            label = label.item()
+
+    if isinstance(label, bool):
+        return json.dumps(label)
+    if isinstance(label, int):
+        return str(label)
+    if isinstance(label, float) and label.is_integer():
+        return str(int(label))
+    if isinstance(label, str):
+        return label
+    return json.dumps(label, sort_keys=True, ensure_ascii=True)
+
+
+def is_scalar_classification_label(label: Any) -> bool:
+    """Return True when a label represents a single classification target."""
+    if hasattr(label, "item"):
+        with suppress(Exception):
+            label = label.item()
+
+    return isinstance(label, (bool, int, float, str))
+
+
+def class_dirname_for_label(label: Any) -> tuple[str, str]:
+    """Return a deterministic class directory name and canonical label token."""
+    token = canonicalize_label_token(label)
+    if re.fullmatch(r"\d+", token):
+        return f"class_{int(token):03d}", token
+
+    safe_label = re.sub(r"[^A-Za-z0-9]+", "_", token).strip("_").lower() or "label"
+    safe_label = safe_label[:32]
+    digest = hashlib.sha1(token.encode("utf-8")).hexdigest()[:8]
+    return f"class_{safe_label}_{digest}", token
+
+
 def point_cloud_to_voxel(points: Any, resolution: int = 32) -> Any:
     import numpy as np
 
@@ -1206,19 +1426,25 @@ def point_cloud_to_voxel(points: Any, resolution: int = 32) -> Any:
     return voxel
 
 
-def save_classification(out_dir: Path, split: str, idx: int, image: Any, label: Any) -> None:
+def save_classification(
+    out_dir: Path,
+    split: str,
+    idx: int,
+    image: Any,
+    label: Any,
+) -> tuple[str, str, bool]:
     import numpy as np
 
-    try:
-        label_val = int(label)
-    except (TypeError, ValueError):
-        label_val = hash(str(label)) % 1000
-    class_dir = out_dir / split / f"class_{label_val:03d}"
+    class_dirname, label_token = class_dirname_for_label(label)
+    class_dir = out_dir / split / class_dirname
     class_dir.mkdir(parents=True, exist_ok=True)
     image_array = np.array(image)
+    voxelized = False
     if image_array.ndim == 2 and image_array.shape[1] == 3:
         image_array = point_cloud_to_voxel(image_array, resolution=32)
+        voxelized = True
     np.savez_compressed(class_dir / f"{idx:05d}.npz", image=image_array)
+    return class_dirname, label_token, voxelized
 
 
 def save_segmentation(out_dir: Path, split: str, case_id: str, image: Any, label: Any) -> None:
@@ -1232,14 +1458,54 @@ def save_segmentation(out_dir: Path, split: str, case_id: str, image: Any, label
     np.savez_compressed(label_dir / f"{case_id}.npz", label=label.astype(np.int32))
 
 
+def build_export_manifest(
+    *,
+    hf_id: str,
+    outdir: str,
+    task: str,
+    split_counts: dict[str, int],
+    label_tokens_by_dir: dict[str, str],
+    point_cloud_voxelized: bool,
+) -> dict[str, Any]:
+    """Build a deterministic manifest for exported datasets."""
+    class_dirs = sorted(label_tokens_by_dir)
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "hf_id": hf_id,
+        "data_dir": outdir,
+        "task": task,
+        "split_counts": split_counts,
+        "sample_format": {
+            "storage": "npz",
+            "image_key": "image",
+            "point_cloud_voxelized": point_cloud_voxelized,
+        },
+    }
+
+    if task == "classification":
+        manifest["class_to_idx"] = {name: idx for idx, name in enumerate(class_dirs)}
+        manifest["class_labels"] = {name: label_tokens_by_dir[name] for name in class_dirs}
+        manifest["num_classes"] = len(class_dirs)
+    else:
+        manifest["sample_format"]["label_key"] = "label"
+
+    return manifest
+
+
 def export_dataset(hf_id: str, outdir: str, limit: int | None = None) -> None:
+    import datasets
     import numpy as np
-    from datasets import load_dataset
+
+    from ndswin.training.data import write_dataset_manifest
 
     out_dir = Path(outdir)
+    split_counts: dict[str, int] = {}
+    label_tokens_by_dir: dict[str, str] = {}
+    exported_task: str | None = None
+    point_cloud_voxelized = False
     print(f"Loading dataset {hf_id}...")
     try:
-        ds = load_dataset(hf_id)
+        ds = datasets.load_dataset(hf_id)
         print("Available splits:", list(ds.keys()))
         for split in ds.keys():
             print(f"Processing split: {split}")
@@ -1253,8 +1519,13 @@ def export_dataset(hf_id: str, outdir: str, limit: int | None = None) -> None:
                 if "label" in example and example["label"] is not None and image_data is not None:
                     image = image_data
                     label = example["label"]
-                    if isinstance(label, int | float):
-                        save_classification(out_dir, split, count, image, label)
+                    if is_scalar_classification_label(label):
+                        class_dirname, label_token, voxelized = save_classification(
+                            out_dir, split, count, image, label
+                        )
+                        label_tokens_by_dir[class_dirname] = label_token
+                        point_cloud_voxelized = point_cloud_voxelized or voxelized
+                        current_task = "classification"
                     else:
                         img = np.array(image)
                         lbl = np.array(label)
@@ -1266,6 +1537,7 @@ def export_dataset(hf_id: str, outdir: str, limit: int | None = None) -> None:
                             lbl = lbl[0]
                         case_id = example.get("image_id") or example.get("id") or f"{split}_{count}"
                         save_segmentation(out_dir, split, str(case_id), img, lbl)
+                        current_task = "segmentation"
                 elif (
                     "images" in example
                     and "labels" in example
@@ -1276,14 +1548,22 @@ def export_dataset(hf_id: str, outdir: str, limit: int | None = None) -> None:
                     lbl = np.array(example["labels"][0])
                     case_id = example.get("id") or f"{split}_{count}"
                     save_segmentation(out_dir, split, str(case_id), img, lbl)
+                    current_task = "segmentation"
                 else:
                     print(
                         f"Warning: skipping example {count} in split {split} (unrecognized format)"
                     )
                     continue
+                if exported_task is None:
+                    exported_task = current_task
+                elif exported_task != current_task:
+                    raise RuntimeError(
+                        f"Mixed dataset task types detected during export: {exported_task} and {current_task}"
+                    )
                 count += 1
                 if limit is not None and count >= limit:
                     break
+            split_counts[split] = count
             print(f"Saved {count} examples under {out_dir / split}")
     except ValueError as exc:
         print(f"load_dataset failed with: {exc}; retrying using streaming fallback...")
@@ -1291,7 +1571,7 @@ def export_dataset(hf_id: str, outdir: str, limit: int | None = None) -> None:
         for split in ("train", "validation", "val", "test"):
             try:
                 print(f"Attempting streaming export for split: {split}")
-                iterator = load_dataset(hf_id, split=split, streaming=True)
+                iterator = datasets.load_dataset(hf_id, split=split, streaming=True)
                 count = 0
                 for example in iterator:
                     image_data = None
@@ -1306,8 +1586,13 @@ def export_dataset(hf_id: str, outdir: str, limit: int | None = None) -> None:
                     ):
                         image = image_data
                         label = example["label"]
-                        if isinstance(label, int | float):
-                            save_classification(out_dir, split, count, image, label)
+                        if is_scalar_classification_label(label):
+                            class_dirname, label_token, voxelized = save_classification(
+                                out_dir, split, count, image, label
+                            )
+                            label_tokens_by_dir[class_dirname] = label_token
+                            point_cloud_voxelized = point_cloud_voxelized or voxelized
+                            current_task = "classification"
                         else:
                             img = np.array(image)
                             lbl = np.array(label)
@@ -1321,6 +1606,7 @@ def export_dataset(hf_id: str, outdir: str, limit: int | None = None) -> None:
                                 example.get("image_id") or example.get("id") or f"{split}_{count}"
                             )
                             save_segmentation(out_dir, split, str(case_id), img, lbl)
+                            current_task = "segmentation"
                     elif (
                         "images" in example
                         and "labels" in example
@@ -1331,21 +1617,40 @@ def export_dataset(hf_id: str, outdir: str, limit: int | None = None) -> None:
                         lbl = np.array(example["labels"][0])
                         case_id = example.get("id") or f"{split}_{count}"
                         save_segmentation(out_dir, split, str(case_id), img, lbl)
+                        current_task = "segmentation"
                     else:
                         print(
                             f"Warning: skipping example {count} in split {split} (unrecognized format)"
                         )
                         continue
+                    if exported_task is None:
+                        exported_task = current_task
+                    elif exported_task != current_task:
+                        raise RuntimeError(
+                            f"Mixed dataset task types detected during export: {exported_task} and {current_task}"
+                        )
                     count += 1
                     if limit is not None and count >= limit:
                         break
                 if count > 0:
                     print(f"Saved {count} examples under {out_dir / split}")
+                    split_counts[split] = count
                     any_saved = True
             except Exception:
                 continue
         if not any_saved:
             raise
+    if exported_task is not None:
+        manifest = build_export_manifest(
+            hf_id=hf_id,
+            outdir=outdir,
+            task=exported_task,
+            split_counts=split_counts,
+            label_tokens_by_dir=label_tokens_by_dir,
+            point_cloud_voxelized=point_cloud_voxelized,
+        )
+        manifest_path = write_dataset_manifest(outdir, manifest)
+        print(f"Wrote dataset manifest: {manifest_path}")
     print("Done.")
 
 
@@ -1357,13 +1662,36 @@ def run_fetch_data_command(args: argparse.Namespace) -> int:
 def find_summary_files(outputs_dir: Path) -> list[Path]:
     if not outputs_dir.exists():
         return []
-    return sorted(
-        outputs_dir.rglob("summary.json"), key=lambda path: path.stat().st_mtime, reverse=True
+    sweeps_dir = outputs_dir / "sweeps" if (outputs_dir / "sweeps").exists() else outputs_dir
+    summary_files = [
+        path for path in sweeps_dir.rglob("summary.json") if path.parent.parent == sweeps_dir
+    ]
+    return sorted(summary_files, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def infer_summary_metric(summary_path: Path) -> str | None:
+    sweep_root = next(
+        (parent for parent in summary_path.parents if parent.parent.name == "sweeps"),
+        None,
     )
+    if sweep_root is None:
+        return None
+
+    for suffix in (".yaml", ".yml", ".json"):
+        sweep_path = Path("configs") / "sweeps" / f"{sweep_root.name}{suffix}"
+        if sweep_path.exists():
+            try:
+                return cast(str | None, load_sweep(str(sweep_path)).get("metric"))
+            except Exception:
+                return None
+    return None
 
 
-def format_best_trial(best_trial: dict[str, Any]) -> list[str]:
+def format_best_trial(best_trial: dict[str, Any], metric: str | None = None) -> list[str]:
     lines = [f"Best Trial: {best_trial.get('trial', 'N/A')}"]
+    if metric is not None and metric in best_trial:
+        lines.append(f"Selection Metric: {metric}")
+        lines.append(f"Metric Value: {best_trial.get(metric, 0.0):.4f}")
     if "val_accuracy" in best_trial:
         lines.append(f"Val Accuracy: {best_trial.get('val_accuracy', 0.0):.4f}")
         lines.append(f"Val Top-5: {best_trial.get('val_top5_accuracy', 0.0):.4f}")
@@ -1384,16 +1712,21 @@ def run_show_best_command(args: argparse.Namespace) -> int:
     if not summaries:
         print("  No sweep results found in outputs/. Run 'make optimize' first.")
         return 0
+    printed_any = False
     for summary in summaries:
         try:
-            best_trial = get_best_trial_from_summary(summary)
+            selection_metric = infer_summary_metric(summary)
+            best_trial = get_best_trial_from_summary(summary, metric=selection_metric)
         except Exception:
             continue
+        if printed_any:
+            print()
         print(f"  Source: {summary}")
-        for line in format_best_trial(best_trial):
+        for line in format_best_trial(best_trial, selection_metric):
             print(f"  {line}")
-        return 0
-    print("  No successful trials found.")
+        printed_any = True
+    if not printed_any:
+        print("  No successful trials found.")
     return 0
 
 
@@ -1436,7 +1769,19 @@ def run_validate_command(args: argparse.Namespace) -> int:
             log_level=args.log_level,
             overrides=list(args.overrides),
         )
-        return_code = run_train_command(train_args)
+        previous_validation_fallback = os.environ.get("ALLOW_VALIDATION_SPLIT_FALLBACK")
+        logger.warning(
+            "Validation smoke test enables ALLOW_VALIDATION_SPLIT_FALLBACK=1 so configs "
+            "without a dedicated validation split can still complete the short smoke run."
+        )
+        os.environ["ALLOW_VALIDATION_SPLIT_FALLBACK"] = "1"
+        try:
+            return_code = run_train_command(train_args)
+        finally:
+            if previous_validation_fallback is None:
+                os.environ.pop("ALLOW_VALIDATION_SPLIT_FALLBACK", None)
+            else:
+                os.environ["ALLOW_VALIDATION_SPLIT_FALLBACK"] = previous_validation_fallback
         if return_code != 0:
             return return_code
         logger.info("")
@@ -1483,7 +1828,12 @@ def build_parser() -> argparse.ArgumentParser:
     auto_parser.add_argument(
         "--base-config", type=str, default=None, help="Optional base experiment JSON file"
     )
-    auto_parser.add_argument("--trials", type=int, default=10, help="Number of sweep trials")
+    auto_parser.add_argument(
+        "--trials",
+        type=int,
+        default=None,
+        help="Override the number of sweep trials from the sweep file",
+    )
     auto_parser.add_argument(
         "--train-epochs", type=int, default=100, help="Epochs for final training"
     )

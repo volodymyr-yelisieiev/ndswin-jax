@@ -4,24 +4,24 @@
   "model": {
     "num_dims": 2,
     "patch_size": [2, 2],
-    "embed_dim": 48,
+    "embed_dim": 96,
     "depths": [2, 2, 6, 2],
     "num_heads": [3, 6, 12, 24],
     "window_size": [4, 4],
     "in_channels": 3,
     "num_classes": 10,
-    "drop_rate": 0.1,
-    "drop_path_rate": 0.3
+    "drop_rate": 0.0,
+    "drop_path_rate": 0.1
   },
   "training": {
     "epochs": 300,
-    "batch_size": 512,
-    "learning_rate": 0.001,
-    "weight_decay": 0.05,
+    "batch_size": 256,
+    "learning_rate": 0.0007,
+    "weight_decay": 0.02,
     "optimizer": "adamw",
     "lr_schedule": "cosine",
     "warmup_epochs": 10,
-    "label_smoothing": 0.1,
+    "label_smoothing": 0.05,
     "early_stopping": true,
     "patience": 15,
     "min_delta": 0.0001
@@ -37,8 +37,9 @@
     "augmentation": true,
     "random_crop": true,
     "random_flip": true,
-    "mixup_alpha": 0.2,
-    "cutmix_alpha": 1.0,
+    "mixup_alpha": 0.0,
+    "cutmix_alpha": 0.5,
+    "cutout_size": 8,
     "random_rotation": 0.0,
     "color_jitter": false,
     "auto_augment": false

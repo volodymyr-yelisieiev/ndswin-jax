@@ -4,6 +4,7 @@ This module provides data loading functionality for various datasets
 and dimensionalities.
 """
 
+import json
 import math
 import os
 import subprocess
@@ -23,6 +24,7 @@ from ndswin.types import Batch
 from ndswin.utils.logging import get_logger
 
 logger = get_logger("data")
+CLASSIFICATION_FILE_EXTS = {".npy", ".npz"}
 
 
 def normalize_split(split: str) -> str:
@@ -152,7 +154,31 @@ def resolve_hf_split(hf_id: str, split: str, *, data_dir: str | None = None) -> 
             "To use Hugging Face datasets install 'datasets' (pip install datasets)"
         ) from e
 
-    available_splits = set(get_dataset_split_names(hf_id, data_dir=data_dir) or [])
+    try:
+        available_splits = set(get_dataset_split_names(hf_id, data_dir=data_dir) or [])
+    except Exception as e:
+        logger.warning(
+            "Could not inspect available splits for Hugging Face dataset '%s'; "
+            "using requested split '%s' without metadata validation: %s",
+            hf_id,
+            normalized_split,
+            e,
+        )
+        if normalized_split == "validation" and _is_enabled_env("ALLOW_VALIDATION_SPLIT_FALLBACK"):
+            logger.warning(
+                "Could not inspect validation-capable splits for Hugging Face dataset '%s'; "
+                "using 'test' because ALLOW_VALIDATION_SPLIT_FALLBACK is enabled.",
+                hf_id,
+            )
+            return "test"
+        if normalized_split == "test" and _is_enabled_env("ALLOW_TEST_SPLIT_FALLBACK"):
+            logger.warning(
+                "Could not inspect test-capable splits for Hugging Face dataset '%s'; "
+                "using 'train' because ALLOW_TEST_SPLIT_FALLBACK is enabled.",
+                hf_id,
+            )
+            return "train"
+        return normalized_split
 
     if normalized_split == "train":
         if "train" in available_splits:
@@ -171,14 +197,18 @@ def resolve_hf_split(hf_id: str, split: str, *, data_dir: str | None = None) -> 
                 hf_id,
             )
             return "val"
-        for fallback in ("test", "train"):
-            if fallback in available_splits:
-                logger.warning(
-                    "Hugging Face dataset '%s' does not provide a validation split; using '%s' instead.",
-                    hf_id,
-                    fallback,
-                )
-                return fallback
+
+        allow_validation_fallback = _is_enabled_env("ALLOW_VALIDATION_SPLIT_FALLBACK")
+        if allow_validation_fallback:
+            for fallback in ("test", "train"):
+                if fallback in available_splits:
+                    logger.warning(
+                        "Hugging Face dataset '%s' does not provide a validation split; "
+                        "using '%s' because ALLOW_VALIDATION_SPLIT_FALLBACK is enabled.",
+                        hf_id,
+                        fallback,
+                    )
+                    return fallback
         raise ValueError(
             f"Hugging Face dataset '{hf_id}' does not provide a validation split. "
             f"Available splits: {sorted(available_splits)}"
@@ -198,6 +228,177 @@ def resolve_hf_split(hf_id: str, split: str, *, data_dir: str | None = None) -> 
         f"Hugging Face dataset '{hf_id}' does not provide a test split. "
         f"Available splits: {sorted(available_splits)}"
     )
+
+
+def dataset_manifest_path(data_dir: str | Path) -> Path:
+    """Return the canonical manifest path for an exported dataset directory."""
+    return Path(data_dir) / "dataset_manifest.json"
+
+
+def load_dataset_manifest(data_dir: str | Path) -> dict[str, Any] | None:
+    """Load a dataset manifest if one exists."""
+    manifest_path = dataset_manifest_path(data_dir)
+    if not manifest_path.exists():
+        return None
+
+    data = json.loads(manifest_path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f"Dataset manifest at {manifest_path} must be a JSON object")
+    return data
+
+
+def write_dataset_manifest(data_dir: str | Path, manifest: dict[str, Any]) -> Path:
+    """Persist a dataset manifest under the dataset root."""
+    manifest_path = dataset_manifest_path(data_dir)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    return manifest_path
+
+
+def _count_split_samples(split_dir: Path) -> int:
+    """Count samples under a split directory for common exported layouts."""
+    image_dir = split_dir / "images"
+    if image_dir.is_dir():
+        return sum(
+            1
+            for path in image_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in CLASSIFICATION_FILE_EXTS
+        )
+
+    return sum(
+        1
+        for path in split_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in CLASSIFICATION_FILE_EXTS
+    )
+
+
+def _infer_classification_folder_contract(data_dir: str | Path) -> dict[str, Any] | None:
+    """Infer class metadata from a local classification folder dataset."""
+    root = Path(data_dir)
+    if not root.exists():
+        return None
+
+    split_counts: dict[str, int] = {}
+    all_classes: set[str] = set()
+
+    for split_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+        if split_dir.name not in {"train", "validation", "val", "test"}:
+            continue
+        if (split_dir / "images").is_dir() and (split_dir / "labels").is_dir():
+            return None
+
+        class_dirs = sorted(path.name for path in split_dir.iterdir() if path.is_dir())
+        if not class_dirs:
+            continue
+
+        all_classes.update(class_dirs)
+        split_counts[split_dir.name] = _count_split_samples(split_dir)
+
+    if not all_classes:
+        return None
+
+    class_names = sorted(all_classes)
+    return {
+        "task": "classification",
+        "num_classes": len(class_names),
+        "class_to_idx": {name: idx for idx, name in enumerate(class_names)},
+        "split_counts": split_counts,
+    }
+
+
+def infer_folder_dataset_contract(data_dir: str | Path) -> dict[str, Any] | None:
+    """Infer a local folder dataset contract, preferring a saved manifest when available."""
+    manifest = load_dataset_manifest(data_dir)
+    folder_contract = _infer_classification_folder_contract(data_dir)
+
+    if manifest is not None:
+        if (
+            folder_contract is not None
+            and isinstance(manifest.get("num_classes"), int)
+            and manifest["num_classes"] != folder_contract["num_classes"]
+        ):
+            raise ValueError(
+                "Dataset manifest class count does not match on-disk folders under "
+                f"{data_dir}: manifest={manifest['num_classes']} folders={folder_contract['num_classes']}"
+            )
+
+        contract = dict(manifest)
+        if folder_contract is not None:
+            contract.setdefault("task", folder_contract["task"])
+            contract.setdefault("num_classes", folder_contract["num_classes"])
+            contract.setdefault("class_to_idx", folder_contract["class_to_idx"])
+            contract.setdefault("split_counts", folder_contract["split_counts"])
+        return contract
+
+    return folder_contract
+
+
+def infer_dataset_contract(config: DataConfig) -> dict[str, Any] | None:
+    """Infer dataset contract metadata for validation and reporting."""
+    dataset_name = config.dataset.lower()
+    folder_contract = infer_folder_dataset_contract(config.data_dir)
+
+    if dataset_name == "cifar10":
+        return {"task": "classification", "num_classes": 10, "source": "builtin"}
+    if dataset_name == "cifar100":
+        return {"task": "classification", "num_classes": 100, "source": "builtin"}
+
+    if folder_contract is not None:
+        return folder_contract
+
+    hf_id = config.hf_id
+    if hf_id is None and dataset_name.startswith("hf:"):
+        hf_id = config.dataset[3:]
+    if hf_id == "cifar10":
+        return {"task": "classification", "num_classes": 10, "source": "huggingface"}
+    if hf_id == "cifar100":
+        return {"task": "classification", "num_classes": 100, "source": "huggingface"}
+
+    return None
+
+
+def validate_dataset_contract(
+    config: DataConfig,
+    *,
+    expected_num_classes: int | None = None,
+    require_validation_split: bool = False,
+) -> dict[str, Any] | None:
+    """Validate dataset layout and class-count expectations before training."""
+    contract = infer_dataset_contract(config)
+
+    if expected_num_classes is not None and contract is not None:
+        actual_num_classes = contract.get("num_classes")
+        if isinstance(actual_num_classes, int) and actual_num_classes != expected_num_classes:
+            raise ValueError(
+                "Dataset/config class count mismatch: "
+                f"dataset reports {actual_num_classes} classes but model.num_classes is {expected_num_classes} "
+                f"for dataset '{config.dataset}' at {config.data_dir}"
+            )
+
+    if require_validation_split:
+        dataset_name = config.dataset.lower()
+        hf_id = config.hf_id
+        if hf_id is None and dataset_name.startswith("hf:"):
+            hf_id = config.dataset[3:]
+
+        if dataset_name in {
+            "volume",
+            "volume_folder",
+            "3d",
+            "your_3d_dataset",
+            "medseg_msd",
+            "medseg",
+            "medseg_brain_tumour",
+        }:
+            resolve_folder_split(
+                config.data_dir,
+                "validation",
+                source_name=f"validate_dataset_contract({config.dataset})",
+            )
+        elif hf_id is not None:
+            resolve_hf_split(hf_id, "validation", data_dir=config.data_dir)
+
+    return contract
 
 
 @dataclass
@@ -347,11 +548,12 @@ class CIFARDataLoader(DataLoader):
         If `datasets` is not available, falls back to `tensorflow_datasets`.
         """
         ds_name = "cifar10" if self.num_classes == 10 else "cifar100"
+        source_split = "train" if self.split in {"train", "validation"} else "test"
         try:
             # Prefer Hugging Face datasets
             from datasets import load_dataset
 
-            ds = load_dataset(ds_name, split=self.split)
+            ds = load_dataset(ds_name, split=source_split)
             images, labels = [], []
             for item in ds:
                 # Support multiple image/label field names used by datasets
@@ -381,7 +583,7 @@ class CIFARDataLoader(DataLoader):
                 import tensorflow_datasets as tfds
 
                 ds = tfds.load(
-                    ds_name, split=self.split, as_supervised=True, data_dir=self.data_dir
+                    ds_name, split=source_split, as_supervised=True, data_dir=self.data_dir
                 )
                 images, labels = [], []
                 for img, label in ds:
@@ -583,6 +785,8 @@ class VolumeFolderDataLoader(DataLoader):
         self.file_paths: list[str] = []
         self.labels: list[int] = []
         self.class_to_idx: dict[str, int] = {}
+        self.split_counts: dict[str, int] = {}
+        self.dataset_contract = infer_folder_dataset_contract(data_dir) or {}
 
         self._scan_files()
         self.num_samples = len(self.file_paths)
@@ -600,7 +804,21 @@ class VolumeFolderDataLoader(DataLoader):
         if not classes:
             raise ValueError(f"No class subdirectories found in {split_dir}")
 
-        self.class_to_idx = {c: i for i, c in enumerate(classes)}
+        contract_class_to_idx = self.dataset_contract.get("class_to_idx")
+        if isinstance(contract_class_to_idx, dict):
+            missing_classes = [cls for cls in classes if cls not in contract_class_to_idx]
+            if missing_classes:
+                raise ValueError(
+                    f"Split {self.split!r} under {self.data_dir} contains classes not present in "
+                    f"the dataset contract: {missing_classes}"
+                )
+            self.class_to_idx = {str(cls): int(idx) for cls, idx in contract_class_to_idx.items()}
+        else:
+            self.class_to_idx = {c: i for i, c in enumerate(classes)}
+
+        split_counts = self.dataset_contract.get("split_counts")
+        if isinstance(split_counts, dict):
+            self.split_counts = {str(name): int(count) for name, count in split_counts.items()}
 
         for cls in classes:
             cls_dir = os.path.join(split_dir, cls)
@@ -705,12 +923,24 @@ class VolumeFolderDataLoader(DataLoader):
 
     @property
     def dataset_info(self) -> DatasetInfo:
+        num_train = int(self.split_counts.get("train", 0))
+        num_val = int(self.split_counts.get("validation", self.split_counts.get("val", 0)))
+        num_test = int(self.split_counts.get("test", 0))
+
+        if not self.split_counts:
+            if self.split == "train":
+                num_train = self.num_samples
+            elif self.split == "validation":
+                num_val = self.num_samples
+            elif self.split == "test":
+                num_test = self.num_samples
+
         return DatasetInfo(
             name=self.name,
             num_classes=len(self.class_to_idx),
-            num_train=0,
-            num_val=0,
-            num_test=0,
+            num_train=num_train,
+            num_val=num_val,
+            num_test=num_test,
             input_shape=(self.in_channels,) + self.image_size,
             mean=self.mean,
             std=self.std,
@@ -950,10 +1180,16 @@ class HuggingFaceDataLoader(DataLoader):
                 "To use Hugging Face datasets install 'datasets' (pip install datasets)"
             ) from e
 
-        # Load the split (may download the dataset)
-        ds = load_dataset(hf_id, split=self.split, data_dir=self.data_dir)
-        # Materialize into memory list for simpler iteration
-        self._examples = list(ds)
+        try:
+            # Load the split (may download the dataset)
+            ds = load_dataset(hf_id, split=self.split, data_dir=self.data_dir)
+            # Materialize into memory list for simpler iteration
+            self._examples = list(ds)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load Hugging Face dataset '{hf_id}' split '{self.split}'. "
+                "Verify the dataset id, local cache, or network/download availability."
+            ) from e
         self.num_samples = len(self._examples)
 
         # Try to infer task type from the first example
@@ -1254,7 +1490,7 @@ def create_data_loader(
             split=normalized_split,
             batch_size=bs,
             shuffle=is_train,
-            seed=config.download if hasattr(config, "download") else 42,
+            seed=42,
             in_channels=config.in_channels,
             image_size=config.image_size,
             mean=config.mean,
@@ -1292,7 +1528,7 @@ def create_data_loader(
                 split=normalized_split,
                 batch_size=bs,
                 shuffle=is_train,
-                seed=config.download if hasattr(config, "download") else 42,
+                seed=getattr(config, "seed", 42),
                 in_channels=config.in_channels,
                 image_size=config.image_size,
                 mean=config.mean,

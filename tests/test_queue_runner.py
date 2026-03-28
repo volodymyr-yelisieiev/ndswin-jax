@@ -130,6 +130,20 @@ def test_build_command_auto_sweep():
     assert "50" in cmd
 
 
+def test_build_command_auto_sweep_omits_trials_when_not_specified():
+    """Queue auto-sweep jobs should defer to sweep-file trials when unset."""
+    from ndswin.cli import build_command
+
+    job = {
+        "type": "auto-sweep",
+        "sweep": "configs/sweeps/cifar10_hyperparam_sweep.yaml",
+        "train_epochs": 25,
+    }
+    cmd = build_command(job, "python")
+    assert "auto-sweep" in cmd
+    assert "--trials" not in cmd
+
+
 def test_build_command_sweep():
     """Test building sweep command."""
     from train.queue_runner import build_command
@@ -274,6 +288,24 @@ def test_config_3d_classification_valid():
     assert len(exp.model.window_size) == 3
     assert exp.model.num_classes == 10
     assert exp.model.embed_dim > 0
+
+
+def test_config_3d_modelnet40_valid():
+    """Test that the ModelNet40 3D config is valid."""
+    config_path = Path("configs/modelnet40.json")
+    if not config_path.exists():
+        pytest.skip("modelnet40.json not found")
+
+    from ndswin.config import ExperimentConfig
+
+    with open(config_path) as f:
+        config_dict = json.load(f)
+
+    exp = ExperimentConfig.from_dict(config_dict)
+    assert exp.model.num_dims == 3
+    assert exp.model.num_classes == 40
+    assert len(exp.model.patch_size) == 3
+    assert len(exp.model.window_size) == 3
 
 
 def test_config_2d_classification_valid():

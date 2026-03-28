@@ -41,8 +41,11 @@ def test_run_sweep_dryrun(tmp_path):
 
     # Check that the summary.json exists and contains two entries
     summary = json.loads((outdir / "summary.json").read_text())
-    assert len(summary) == 2
-    for entry in summary:
+    assert summary["metric"] == "val_accuracy"
+    assert summary["trials"] == 2
+    assert summary["mode"] == "dry-run"
+    assert len(summary["results"]) == 2
+    for entry in summary["results"]:
         assert entry["status"] == "dry" or "config_path" in entry
 
     # Clean up
@@ -60,19 +63,22 @@ def test_run_sweep_full_run_passes_loaded_sweep_config(tmp_path, monkeypatch):
     }
     sweep_path.write_text(yaml.safe_dump(sweep))
 
-    import train.run_sweep as run_sweep
+    import argparse
+
+    import ndswin.cli as cli
 
     captured: dict[str, object] = {}
     sentinel_exp = SimpleNamespace()
 
     monkeypatch.setattr(
-        run_sweep,
+        cli,
         "load_base_experiment",
         lambda path: SimpleNamespace(model=SimpleNamespace(embed_dim=96, num_heads=(3, 6, 12, 24))),
     )
     monkeypatch.setattr(
-        run_sweep, "materialize_experiment", lambda base_exp, sampled, budget: sentinel_exp
+        cli, "materialize_experiment", lambda base_exp, sampled, budget: sentinel_exp
     )
+    monkeypatch.setattr(cli, "validate_experiment_dataset_contract", lambda *args, **kwargs: None)
 
     def fake_run_trial(trial_idx, exp, out_dir, dry_run=False, sweep_config=None):
         captured["trial_idx"] = trial_idx
@@ -88,17 +94,38 @@ def test_run_sweep_full_run_passes_loaded_sweep_config(tmp_path, monkeypatch):
             "config_path": str(out_dir / "config.json"),
         }
 
-    monkeypatch.setattr(run_sweep, "run_trial", fake_run_trial)
+    monkeypatch.setattr(cli, "run_trial", fake_run_trial)
     monkeypatch.setitem(sys.modules, "jax", SimpleNamespace(clear_caches=lambda: None))
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["run_sweep.py", "--sweep", str(sweep_path), "--outdir", str(tmp_path / "custom_outdir")],
+    args = argparse.Namespace(
+        sweep=str(sweep_path),
+        base_config=None,
+        trials=None,
+        dry_run=False,
+        outdir=str(tmp_path / "custom_outdir"),
+        seed=None,
+        log_level="INFO",
     )
 
-    run_sweep.main()
+    cli.run_sweep_command(args)
 
     assert captured["trial_idx"] == 0
     assert captured["exp"] is sentinel_exp
     assert captured["dry_run"] is False
     assert captured["sweep_config"] == sweep
+
+    summary = json.loads((Path(args.outdir) / "summary.json").read_text())
+    assert summary["budget_epochs"] == 3
+    assert summary["trials"] == 1
+    assert summary["results"][0]["trial"] == 0
+
+
+def test_materialize_experiment_preserves_useful_warmup_budget():
+    import ndswin.cli as cli
+
+    base = cli.load_base_experiment("configs/cifar10.json")
+    sampled = {"training.warmup_epochs": 10}
+
+    exp = cli.materialize_experiment(base, sampled, budget_epochs=20)
+
+    assert exp.training.epochs == 20
+    assert exp.training.warmup_epochs == 10

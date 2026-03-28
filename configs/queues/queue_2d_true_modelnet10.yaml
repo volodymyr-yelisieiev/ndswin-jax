@@ -1,0 +1,14 @@
+jobs:
+  - name: cifar10_sweep_and_train
+    type: auto-sweep
+    sweep: configs/sweeps/cifar10_hyperparam_sweep.yaml
+    trials: 20
+    train_epochs: 300
+    retries: 1
+
+  - name: true_modelnet10_sweep_and_train
+    type: auto-sweep
+    sweep: configs/sweeps/modelnet10_hyperparam_sweep.yaml
+    trials: 15
+    train_epochs: 200
+    retries: 1

@@ -1,4 +1,5 @@
 trials: 15
+metric: val_accuracy
 budget_epochs: 10
 max_steps_per_epoch: 100
 output_dir: outputs/sweeps/modelnet10_hyperparam_sweep

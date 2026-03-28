@@ -335,6 +335,11 @@ class Trainer:
         self.state: TrainState | None = None
         self.step = 0
         self.epoch = 0
+        self.best_state: TrainState | None = None
+        self.best_epoch: int | None = None
+        self.best_metric_name: str | None = None
+        self.best_metric_value: float | None = None
+        self.best_metrics: dict[str, float] | None = None
         self.logger = get_logger("ndswin.training")
 
         # Setup Mesh and Sharding for distributed training
@@ -529,6 +534,16 @@ class Trainer:
             }
         return batch, real_bs
 
+    def _copy_state(self, state: TrainState) -> TrainState:
+        """Create an in-memory snapshot of the current training state."""
+        return cast(
+            TrainState,
+            jax.tree_util.tree_map(
+                lambda leaf: leaf.copy() if hasattr(leaf, "copy") else leaf,
+                state,
+            ),
+        )
+
     def fit(
         self,
         train_loader: Any,
@@ -566,6 +581,11 @@ class Trainer:
         min_delta = getattr(self.config, "min_delta", 0.0001)
         best_val_metric = -float("inf")
         epochs_without_improvement = 0
+        self.best_state = None
+        self.best_epoch = None
+        self.best_metric_name = None
+        self.best_metric_value = None
+        self.best_metrics = None
 
         self.logger.info("Starting training for %d epochs", num_epochs)
         start_time = time.time()
@@ -650,20 +670,28 @@ class Trainer:
             for callback in self.callbacks:
                 callback(self, epoch, train_metrics, history)
 
-            # Early stopping check
-            if early_stop and val_loader is not None:
+            # Track and optionally early-stop on the validation metric.
+            if val_loader is not None:
                 if self.task == "segmentation":
                     current_metric = val_metrics.get("dice", val_metrics.get("val_dice", 0.0))
+                    metric_name = "val_dice"
                 else:
                     current_metric = val_metrics.get(
                         "accuracy", val_metrics.get("val_accuracy", 0.0)
                     )
+                    metric_name = "val_accuracy"
                 if current_metric > best_val_metric + min_delta:
                     best_val_metric = current_metric
                     epochs_without_improvement = 0
+                    if self.state is not None:
+                        self.best_state = self._copy_state(self.state)
+                    self.best_epoch = epoch + 1
+                    self.best_metric_name = metric_name
+                    self.best_metric_value = float(current_metric)
+                    self.best_metrics = {key: float(value) for key, value in val_metrics.items()}
                 else:
                     epochs_without_improvement += 1
-                if epochs_without_improvement >= patience:
+                if early_stop and epochs_without_improvement >= patience:
                     self.logger.info(
                         "Early stopping at epoch %d: no improvement for %d epochs (best=%.4f)",
                         epoch + 1,
@@ -673,6 +701,15 @@ class Trainer:
                     break
 
         total_time = time.time() - start_time
+        if val_loader is not None and self.best_state is not None:
+            self.state = self.best_state
+            if self.best_epoch is not None and self.best_metric_name is not None:
+                self.logger.info(
+                    "Restored best validation state from epoch %d (%s=%.4f)",
+                    self.best_epoch,
+                    self.best_metric_name,
+                    self.best_metric_value or 0.0,
+                )
         self.logger.info("Training completed in %.2fs", total_time)
 
         return history

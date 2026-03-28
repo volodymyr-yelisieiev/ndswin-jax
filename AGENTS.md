@@ -10,7 +10,7 @@ Help humans make safe, accurate changes to **NDSwin-JAX**, a JAX/Flax project fo
 Priorities, in order:
 
 1. **Be truthful about the current repo state.** Verify behavior from the code before documenting or promising it.
-2. **Use the supported entrypoints.** In this repo, that means `make` targets first, and the package CLI (`ndswin`) underneath.
+2. **Use the supported entrypoints.** In this repo, that means `make` targets as thin convenience shortcuts, with the package CLI (`ndswin`) as the source of truth underneath.
 3. **Protect experiment artifacts.** Avoid destructive cleanup unless explicitly requested.
 4. **Preserve generality.** The project is designed for arbitrary 2D/3D/N-D datasets, not just CIFAR examples.
 5. **Leave the repo easier for the next agent.** Update docs/instructions when workflows change.
@@ -19,7 +19,7 @@ Priorities, in order:
 
 ## 2. Golden Rules
 
-### Rule A — Prefer `make`
+### Rule A — Prefer `make`, but treat `ndswin` as canonical
 
 For normal project workflows, **always start with a `make` target**.
 
@@ -83,10 +83,19 @@ These points reflect the repository as it exists now:
   - `train`
   - `sweep`
   - `auto-sweep`
-- `make optimize` is the highest-level workflow: it tries to fetch data, runs `auto-sweep`, then runs `show-best`.
+- For long unattended benchmark workflows, prefer the tmux-backed `make *-tmux` wrappers. Their wrapper logs now live under `logs/tmux/{train,sweep,auto_sweep,queue}/`.
+- `make optimize` is the highest-level shortcut: it tries to fetch data, runs `auto-sweep`, then runs `show-best`.
 - `make validate` runs the CLI validation command, which by default runs **pytest first** and then a short smoke-training run.
 - Hugging Face caches are intentionally localized via environment variables such as `HF_HOME=.hf_cache` and `HF_DATASETS_CACHE=.hf_cache`.
 - Outputs are organized by dataset/stamp under `outputs/`, and logs are organized under `logs/`.
+- `fetch-data` writes `dataset_manifest.json` under the exported dataset root. Train/sweep/queue commands validate dataset class counts against either that manifest or the on-disk folder structure before training starts.
+- Sweep configs can set `metric`, and `auto-sweep` now respects the sweep file's `trials` unless `--trials` is explicitly passed.
+- The training CLI now requires a real validation split by default. Validation fallback is opt-in via `ALLOW_VALIDATION_SPLIT_FALLBACK=1`; silent fallback to `test` is no longer part of the CLI contract.
+- `show-best` reports the best trial for each sweep summary it finds, not just the first recent summary.
+- If the local workspace still has a 40-class voxel export under `data/modelnet10/`, that path is stale; the 40-class export belongs under `data/modelnet40/`.
+- The example 3D configs are split intentionally:
+  - `configs/modelnet10.json` is a **true ModelNet10 template**
+  - `configs/modelnet40.json` is the **40-class public example config**
 
 ### Important nuance about the environment
 
@@ -192,6 +201,7 @@ make clean-all FORCE=1
 - The core examples currently live in:
   - `configs/cifar10.json`
   - `configs/modelnet10.json`
+  - `configs/modelnet40.json`
 - Prefer creating or editing task-specific configs instead of hard-coding assumptions around CIFAR.
 - Preserve the repo's general N-D design:
   - `model.num_dims` controls the dimensionality
@@ -203,8 +213,11 @@ make clean-all FORCE=1
 - Sweep files may be YAML or JSON.
 - The main examples live in `configs/sweeps/`.
 - `make sweep` writes results under `outputs/sweeps/...` by default.
+- Sweep `summary.json` files now store top-level metadata such as `metric`, `trials`, and `budget_epochs`, with per-trial entries under `results`.
+- Sweep selection honors the sweep file's `metric` field when choosing the best trial.
 - `make auto-sweep` selects the best trial and trains it.
 - `make optimize` wraps fetching + auto-sweep + show-best.
+- `configs/queues/benchmark_2d_then_3d.yaml` is the canonical sequential benchmark queue for `2D optimize -> 2D train -> 3D optimize -> 3D train`.
 
 ### Queues
 
@@ -212,6 +225,7 @@ make clean-all FORCE=1
 - The current queue runner supports `train`, `sweep`, and `auto-sweep` jobs.
 - Use queues when the human wants multi-stage or multi-dataset execution.
 - Prefer `--dry-run` behavior from the CLI if you need to inspect generated commands safely.
+- `queue-tmux` remains optional shell ergonomics for routine use, but it is the preferred wrapper for unattended multi-stage benchmark runs in shared environments.
 
 ---
 
@@ -308,7 +322,7 @@ Always report exactly what you ran and whether any failure was due to environmen
 - `make validate` is not just a static check; it can launch a smoke training run.
 - `make optimize` may fetch data and run long experiments. Do not launch it casually.
 - `make clean-logs`, `make clean-runs`, and `make clean-all` are destructive without backups.
-- `tmux`-based targets create detached sessions and log files; check `make status` before starting more sessions.
+- `tmux`-based targets create detached sessions and wrapper logs under `logs/tmux/`; check `make status` before starting more sessions.
 - The repository contains older wrapper scripts in `train/`; do not mistake them for the primary implementation layer.
 - When updating documentation, avoid repeating claims about environment auto-resolution unless you confirmed the Makefile actually implements them.
 
@@ -338,7 +352,7 @@ When updating this file:
 
 If you remember only a few things, remember these:
 
-- **Use `make`, not raw project scripts.** Don't call `python train/*.py` directly.
+- **Use `make` or `ndswin`, not raw project scripts.** Don't call `python train/*.py` directly.
 - **Treat `src/ndswin/cli.py` + `Makefile` as the truth.** Don't trust stale docs.
 - **Keep the project generic across N-dimensional datasets.**
 - **Don't delete experiment artifacts manually** — use `make backup` / `make clean-*`.

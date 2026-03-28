@@ -14,10 +14,10 @@
 #   make queue-tmux QUEUE_FILE=configs/queues/example_queue.yaml
 #
 # Filter to specific jobs:
-#   python train/queue_runner.py --queue configs/queues/example_queue.yaml --jobs my_2d_sweep
+#   ndswin queue --queue configs/queues/example_queue.yaml --jobs my_2d_sweep
 #
 # Resume after interruption (skip already-completed jobs):
-#   python train/queue_runner.py --queue configs/queues/example_queue.yaml --skip-completed
+#   ndswin queue --queue configs/queues/example_queue.yaml --skip-completed
 
 jobs:
   # Example 1: 2D image classification sweep + train
@@ -29,9 +29,9 @@ jobs:
     retries: 1
 
   # Example 2: 3D voxel classification sweep + train
-  - name: modelnet10_sweep_and_train
+  - name: modelnet40_sweep_and_train
     type: auto-sweep
-    sweep: configs/sweeps/modelnet10_hyperparam_sweep.yaml
+    sweep: configs/sweeps/modelnet40_hyperparam_sweep.yaml
     trials: 12
     train_epochs: 100
     retries: 1
