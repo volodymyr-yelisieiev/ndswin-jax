@@ -73,6 +73,8 @@ def test_get_best_trial_reads_metric_from_summary_payload(tmp_path: Path):
     summary_path = tmp_path / "summary.json"
     payload = {
         "metric": "val_top5_accuracy",
+        "sampling_rejections": 3,
+        "rejection_reasons": {"Sampled warmup_epochs must be less than budget_epochs": 3},
         "results": [
             {"trial": 0, "status": "done", "val_accuracy": 0.9, "val_top5_accuracy": 0.92},
             {"trial": 1, "status": "done", "val_accuracy": 0.8, "val_top5_accuracy": 0.98},

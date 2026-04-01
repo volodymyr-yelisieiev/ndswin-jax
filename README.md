@@ -59,7 +59,7 @@ The repository now ships a real package CLI so every workflow is available behin
 ndswin train --config configs/cifar10.json
 ndswin sweep --sweep configs/sweeps/cifar10_hyperparam_sweep.yaml --dry-run --trials 2
 ndswin auto-sweep --sweep configs/sweeps/cifar10_hyperparam_sweep.yaml --train-epochs 50
-ndswin queue --queue configs/queues/queue_2d_3d.yaml --dry-run
+ndswin queue --queue configs/queues/benchmark_2d_then_3d.yaml --dry-run
 ndswin fetch-data --hf-id cifar10 --outdir data/cifar10 --limit 100
 ndswin show-best
 ndswin validate --config configs/cifar10.json --train-epochs 2
@@ -89,7 +89,7 @@ make sweep SWEEP=configs/sweeps/my_custom_sweep.yaml SWEEP_TRIALS=20
 make fetch-data HF_DATASET=jxie/modelnet40 DATASET_DIR=data/modelnet40
 
 # Run a sequential queue. `queue-tmux` is optional if you want a detached shell.
-make queue QUEUE_FILE=configs/queues/queue_2d_3d.yaml
+make queue QUEUE_FILE=configs/queues/benchmark_2d_then_3d.yaml
 ```
 
 ## Configuration

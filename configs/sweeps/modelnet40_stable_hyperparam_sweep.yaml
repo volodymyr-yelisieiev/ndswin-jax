@@ -2,7 +2,7 @@ trials: 15
 metric: val_accuracy
 budget_epochs: 10
 max_steps_per_epoch: 100
-output_dir: outputs/sweeps/modelnet40_hyperparam_sweep
+output_dir: outputs/sweeps/modelnet40_stable_hyperparam_sweep
 base_config: configs/modelnet40.json
 
 param_space:
@@ -31,4 +31,4 @@ param_space:
     values: [0.0, 0.1]
   training.warmup_epochs:
     kind: choice
-    values: [5, 10, 20]
+    values: [1, 3, 5, 7, 9]

@@ -323,7 +323,7 @@ def test_config_2d_classification_valid():
     assert exp.model.num_dims == 2
     assert len(exp.model.patch_size) == 2
     assert exp.model.num_classes == 10
-    assert exp.model.embed_dim == 48  # verify we use the smaller size
+    assert exp.model.embed_dim == 96
 
 
 def test_config_descriptions_accurate():
@@ -345,11 +345,11 @@ def test_config_descriptions_accurate():
         assert "10 classes" in data["description"]
 
 
-def test_sweep_config_embed_dim_divisible():
-    """Test that all embed_dim choices in sweep configs are divisible by num_heads[0]."""
-    sweep_path = Path("configs/sweeps/cifar10_hyperparam_sweep.yaml")
+def test_tuned_cifar_sweep_uses_valid_search_space():
+    """The tuned CIFAR sweep should avoid known-invalid architecture samples."""
+    sweep_path = Path("configs/sweeps/cifar10_tuned_hyperparam_sweep.yaml")
     if not sweep_path.exists():
-        pytest.skip("cifar10 sweep not found")
+        pytest.skip("tuned cifar10 sweep not found")
 
     try:
         import yaml
@@ -359,10 +359,29 @@ def test_sweep_config_embed_dim_divisible():
     with open(sweep_path) as f:
         sweep = yaml.safe_load(f)
 
-    embed_choices = sweep.get("param_space", {}).get("model.embed_dim", {}).get("values", [])
-    # Default num_heads[0] for Swin is 3
-    for dim in embed_choices:
-        assert dim % 3 == 0, f"embed_dim {dim} not divisible by num_heads[0]=3"
+    assert sweep["base_config"] == "configs/cifar10_tuned.json"
+    assert sweep["budget_epochs"] == 60
+    assert "model.embed_dim" not in sweep.get("param_space", {})
+
+
+def test_stable_modelnet40_sweep_warmup_choices_fit_budget():
+    """The stable 3D sweep should never sample warmup epochs at or above budget."""
+    sweep_path = Path("configs/sweeps/modelnet40_stable_hyperparam_sweep.yaml")
+    if not sweep_path.exists():
+        pytest.skip("stable modelnet40 sweep not found")
+
+    try:
+        import yaml
+    except ImportError:
+        pytest.skip("PyYAML not installed")
+
+    with open(sweep_path) as f:
+        sweep = yaml.safe_load(f)
+
+    budget = int(sweep["budget_epochs"])
+    warmup_values = sweep.get("param_space", {}).get("training.warmup_epochs", {}).get("values", [])
+    assert warmup_values
+    assert all(int(value) < budget for value in warmup_values)
 
 
 @pytest.mark.skipif(not HAS_YAML, reason="PyYAML not installed")
@@ -382,3 +401,25 @@ def test_example_queue_valid():
         assert "name" in job
         assert "type" in job
         assert job["type"] in ("auto-sweep", "sweep", "train")
+
+
+@pytest.mark.skipif(not HAS_YAML, reason="PyYAML not installed")
+def test_benchmark_queue_dry_run():
+    """The canonical 2D->3D benchmark queue should remain dry-run executable."""
+    queue_path = Path("configs/queues/benchmark_2d_then_3d.yaml")
+    if not queue_path.exists():
+        pytest.skip("benchmark queue not found")
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "ndswin.cli",
+        "queue",
+        "--queue",
+        str(queue_path),
+        "--dry-run",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=cli_env())
+    assert result.returncode == 0
+    assert "cifar10_optimize_then_train" in result.stdout
+    assert "modelnet40_optimize_then_train" in result.stdout

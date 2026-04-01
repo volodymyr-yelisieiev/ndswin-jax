@@ -1,0 +1,42 @@
+\begin{tikzpicture}
+  \begin{groupplot}[
+    group style={group size=1 by 2, vertical sep=1.0cm},
+    width=0.95\linewidth,
+    xmin=1,
+    xmax=26,
+    tick label style={font=\small},
+    label style={font=\small},
+    grid style={draw=black!10}
+  ]
+    \nextgroupplot[
+      height=0.24\textheight,
+      ylabel={Accuracy},
+      ymin=0.15,
+      ymax=1.02,
+      ymajorgrids=true,
+      legend style={draw=none, fill=none, font=\footnotesize, at={(0.5,1.16)}, anchor=south, legend columns=3}
+    ]
+      \addplot[color=ndsblue, line width=1.0pt] table[col sep=comma, x=epoch, y=train_accuracy] {data/modelnet40_training.csv};
+      \addlegendentry{Train}
+
+      \addplot[color=ndsgold, line width=1.0pt] table[col sep=comma, x=epoch, y=val_accuracy] {data/modelnet40_training.csv};
+      \addlegendentry{Validation}
+
+      \addplot[only marks, mark=star, mark size=4pt, color=ndsred, fill=ndsred] coordinates {(6,0.7572879195213318)};
+      \addlegendentry{Best checkpoint}
+
+      \addplot[color=ndsred, dashed, line width=0.9pt] coordinates {(6,0.15) (6,1.02)};
+
+    \nextgroupplot[
+      height=0.22\textheight,
+      xlabel={Epoch},
+      ylabel={Loss},
+      ymin=0.0,
+      ymax=3.8,
+      ymajorgrids=true
+    ]
+      \addplot[color=ndsblue, line width=1.0pt] table[col sep=comma, x=epoch, y=train_loss] {data/modelnet40_training.csv};
+      \addplot[color=ndsgold, line width=1.0pt] table[col sep=comma, x=epoch, y=val_loss] {data/modelnet40_training.csv};
+      \addplot[color=ndsred, dashed, line width=0.9pt] coordinates {(6,0.0) (6,3.8)};
+  \end{groupplot}
+\end{tikzpicture}

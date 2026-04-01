@@ -1,0 +1,122 @@
+% !TeX program = xelatex
+% !TeX encoding = UTF-8
+% !TeX spellcheck = en_US
+% !BIB program = biber
+\documentclass[a4paper,oneside,10pt,english]{scrartcl}
+\usepackage[techreport,fancyfonts]{jkureport}
+
+\usepackage{csquotes}
+\usepackage[backend=biber,citestyle=numeric,sortcites=true,maxcitenames=2,style=ACM-Reference-Format]{biblatex}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\usepackage{siunitx}
+\usepackage{tabularx}
+\usepackage{tikz}
+\usepackage{xurl}
+
+\usetikzlibrary{arrows.meta,backgrounds,calc,fit,positioning}
+\usepgfplotslibrary{groupplots}
+\pgfplotsset{compat=1.18}
+
+\definecolor{ndsblue}{HTML}{255F85}
+\definecolor{ndsgold}{HTML}{B57922}
+\definecolor{ndsgreen}{HTML}{4E7A2E}
+\definecolor{ndsred}{HTML}{A33A2B}
+\definecolor{ndsgray}{HTML}{5C6670}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\setcounter{biburlnumpenalty}{100}
+\setcounter{biburllcpenalty}{100}
+\setcounter{biburlucpenalty}{100}
+\addbibresource{references.bib}
+
+\sisetup{
+  detect-all,
+  group-separator = {,},
+  group-minimum-digits = 4,
+  round-mode = places,
+  round-precision = 2
+}
+
+\title{NDSwin-JAX:\texorpdfstring{\\}{ }Implementing and Evaluating an N-Dimensional\texorpdfstring{\\}{ }Shifted Window Transformer in JAX}
+\titleshort{NDSwin-JAX}
+\subtitle{Technical Report\texorpdfstring{\\}{ - }%
+  \usekomafont{subtitlesmall}%
+  Practical Work in AI (BSc)\texorpdfstring{\\}{ - }%
+  \usekomafont{subtitlesmall}Institute for Machine Learning, Johannes Kepler University Linz%
+}
+\author{Volodymyr Yelisieiev\matno{12340334}}
+\supervisor[1,male]{Gianluca Galletti}
+\submissiondepartment{KUSSS IDs 365.266 / 365.267\texorpdfstring{\\}{ - }Semester: SS 2026}
+\date{2026-04-01}
+\revisionblock{%
+Public repository:\texorpdfstring{\\}{ - }%
+\url{https://github.com/volodymyr-yelisieiev/ndswin-jax}%
+}
+
+\begin{document}
+\maketitle
+
+\cleardoubleoddpage
+\tableofcontents
+
+\cleardoubleoddpage
+\addsec{Abstract}
+\input{sections/00-abstract}
+
+\cleardoubleoddpage
+\section{Introduction}
+\label{sec:introduction}
+\input{sections/01-introduction}
+
+\section{Related Work}
+\label{sec:related-work}
+\input{sections/02-related-work}
+
+\section{Methods and Implementation}
+\label{sec:methods}
+\input{sections/03-methods}
+
+\section{Experimental Setup}
+\label{sec:setup}
+\input{sections/04-experimental-setup}
+
+\section{Results and Interpretation}
+\label{sec:results}
+\input{sections/05-results}
+
+\section{Limitations and Conclusion}
+\label{sec:limitations}
+\input{sections/06-limitations-conclusion}
+
+\printbibliography
+
+\appendix
+\section{Committed Artifact Copies}
+\label{app:artifacts}
+The public code for this project is available at \url{https://github.com/volodymyr-yelisieiev/ndswin-jax}. The quantitative evidence in this report is tied to local snapshot \texttt{843295e09f86ff8e40c1bf2545862e5e3da10826} and to the committed experiment-artifact copies under \path{report/data/sources/}. The derived plot tables in \path{report/data/*.csv} are regenerated from those local copies by \path{report/extract_report_data.py}.
+
+The figures and tables in this report are derived from the following committed artifact copies, relative to \path{report/data/sources/}:
+
+\small
+\begin{tabularx}{\linewidth}{@{}lY@{}}
+  \textbf{Sweep summaries} & \path{outputs/sweeps/cifar10_tuned_hyperparam_sweep/summary.json} \\
+   & \path{outputs/sweeps/modelnet40_stable_hyperparam_sweep/summary.json} \\
+  \textbf{Final metrics} & \path{outputs/cifar10/cifar10_tuned_4b2313b9_20260401_032614/checkpoints/metrics.json} \\
+   & \path{outputs/volume_folder/modelnet40_f67c9398_20260401_060749/checkpoints/metrics.json} \\
+  \textbf{Logs} & \path{logs/queue_20260330_174711.json} \\
+   & \path{logs/tmux/queue/queue_20260330_174711.log} \\
+   & \path{logs/cifar10/cifar10_tuned_4b2313b9_20260401_032614.log} \\
+   & \path{logs/volume_folder/modelnet40_f67c9398_20260401_060749.log} \\
+  \textbf{Dataset manifest} & \path{data/modelnet40/dataset_manifest.json} \\
+  \textbf{Best configs} & \path{configs/auto_best/best_cifar10_cifar10_tuned_07366165_20260331_090657_trial022.json} \\
+   & \path{configs/auto_best/best_volume_folder_modelnet40_e548c891_20260401_055016_trial011.json} \\
+\end{tabularx}
+\normalsize
+
+Code-level implementation claims are grounded in the tracked repository files \path{pyproject.toml}, \path{src/ndswin/training/trainer.py}, and \path{src/ndswin/utils/gpu.py}.
+
+\end{document}

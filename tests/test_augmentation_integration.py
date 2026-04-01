@@ -11,11 +11,13 @@ import numpy as np
 
 from ndswin.config import DataConfig
 from ndswin.training.augmentation import (
+    ColorJitter,
     Compose,
+    Cutout,
     MixupOrCutmix,
     create_augmentation_pipeline,
 )
-from ndswin.training.data import SyntheticDataLoader, create_data_loader
+from ndswin.training.data import CIFARDataLoader, SyntheticDataLoader, create_data_loader
 
 
 class TestAugmentationPipelineWiring:
@@ -108,8 +110,26 @@ class TestAugmentationPipelineWiring:
         )
         pipeline = create_augmentation_pipeline(config, is_training=True)
         assert isinstance(pipeline, Compose)
-        # random_crop + random_flip + cutout + normalize = 4
-        assert len(pipeline.transforms) == 4
+        assert len(pipeline.transforms) == 5
+        assert any(isinstance(transform, ColorJitter) for transform in pipeline.transforms)
+        assert any(isinstance(transform, Cutout) for transform in pipeline.transforms)
+
+    def test_pipeline_skips_color_jitter_for_3d_inputs(self):
+        """Color jitter should remain a 2D RGB-only augmentation."""
+        config = DataConfig(
+            dataset="volume_folder",
+            image_size=(32, 32, 32),
+            in_channels=1,
+            augmentation=True,
+            random_flip=True,
+            color_jitter=True,
+            normalize=True,
+            mean=(0.5,),
+            std=(0.5,),
+        )
+        pipeline = create_augmentation_pipeline(config, is_training=True)
+        assert isinstance(pipeline, Compose)
+        assert not any(isinstance(transform, ColorJitter) for transform in pipeline.transforms)
 
 
 class TestMixupCutmixIntegration:
@@ -229,3 +249,47 @@ class TestDataLoaderAugmentation:
 
         # Output should maintain the same shape
         assert result.shape == (3, 32, 32)
+
+    def test_cifar_loader_extracts_fast_path_color_jitter_and_cutout(self):
+        """CIFAR loader should activate the fast augmentation path for tuned 2D recipes."""
+
+        class MockCIFARLoader(CIFARDataLoader):
+            def _load_data(self):
+                return np.ones((8, 3, 32, 32), dtype=np.float32), np.zeros(8, dtype=np.int64)
+
+            @property
+            def dataset_info(self):
+                from ndswin.training.data import DatasetInfo
+
+                return DatasetInfo(
+                    "mock", 10, 8, 0, 0, (3, 32, 32), (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
+                )
+
+        config = DataConfig(
+            dataset="cifar10",
+            image_size=(32, 32),
+            in_channels=3,
+            augmentation=True,
+            random_crop=True,
+            random_flip=True,
+            color_jitter=True,
+            cutout_size=8,
+            normalize=True,
+            mean=(0.5, 0.5, 0.5),
+            std=(0.5, 0.5, 0.5),
+        )
+        pipeline = create_augmentation_pipeline(config, is_training=True, skip_normalize=True)
+        loader = MockCIFARLoader(
+            name="mock",
+            data_dir="tmp",
+            split="train",
+            batch_size=4,
+            shuffle=False,
+            transform=pipeline,
+        )
+
+        assert loader._do_random_crop is True
+        assert loader._random_flip_p == 0.5
+        assert loader._color_jitter_brightness == 0.4
+        assert loader._color_jitter_contrast == 0.4
+        assert loader._cutout_size == 8

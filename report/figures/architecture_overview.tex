@@ -1,0 +1,35 @@
+\begin{tikzpicture}[
+  font=\footnotesize,
+  >=Latex,
+  node distance=0.18cm and 0.18cm,
+  pipeline/.style={draw=black!60, rounded corners=2pt, thick, minimum height=1.35cm, text width=1.78cm, align=center},
+  op/.style={pipeline, fill=ndsblue!10},
+  stage/.style={pipeline, fill=ndsgold!16},
+  head/.style={pipeline, fill=ndsgreen!14},
+  flow/.style={-Latex, thick, draw=black!65},
+  note/.style={draw=ndsgray!70, rounded corners=4pt, fill=black!2, inner sep=5pt, align=center, text width=0.78\linewidth}
+]
+  \node[op] (input) {Input tensor\\$(B, C, *s)$};
+  \node[op, right=of input] (patch) {Patch\\embedding};
+  \node[op, right=of patch] (window) {Window ops\\partition, shift,\\reverse, bias};
+  \node[stage, right=of window] (stages) {Swin stages\\attention +\\patch merging};
+  \node[head, right=of stages] (head) {Global pool\\+ classifier};
+
+  \draw[flow] (input) -- (patch);
+  \draw[flow] (patch) -- (window);
+  \draw[flow] (window) -- (stages);
+  \draw[flow] (stages) -- (head);
+
+  \begin{scope}[on background layer]
+    \node[
+      draw=ndsgray!75,
+      dashed,
+      rounded corners=4pt,
+      fit=(patch) (window) (stages),
+      inner sep=9pt,
+      label={[font=\footnotesize, align=center]above:Shared N-dimensional operators}
+    ] {};
+  \end{scope}
+
+  \node[note, below=0.7cm of window.south] (note) {Spatial bookkeeping is driven by configuration, so the same path handles 2D windows such as \(4 \times 4\) and 3D windows such as \(4 \times 4 \times 4\).};
+\end{tikzpicture}

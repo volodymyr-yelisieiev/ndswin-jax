@@ -526,6 +526,13 @@ class CIFARDataLoader(DataLoader):
         self.mean = mean
         self.std = std
         self.num_classes = num_classes
+        self._do_random_crop = False
+        self._random_flip_p = 0.0
+        self._color_jitter_brightness = 0.0
+        self._color_jitter_contrast = 0.0
+        self._cutout_size = 0
+        self._cutout_p = 0.0
+        self._configure_transform_flags()
 
         self.x, self.y = self._load_data()
 
@@ -540,6 +547,32 @@ class CIFARDataLoader(DataLoader):
                 self.y = self.y[:-val_size]
 
         self.num_samples = len(self.x)
+
+    def _configure_transform_flags(self) -> None:
+        """Extract supported fast-path augmentations from the configured transform."""
+        transforms = getattr(self.transform, "transforms", None)
+        if not transforms:
+            return
+
+        from ndswin.training.augmentation import (
+            ColorJitter,
+            Cutout,
+            RandomCrop,
+            RandomHorizontalFlip,
+        )
+
+        for transform in transforms:
+            if isinstance(transform, RandomCrop):
+                self._do_random_crop = True
+            elif isinstance(transform, RandomHorizontalFlip):
+                self._random_flip_p = float(transform.p)
+            elif isinstance(transform, ColorJitter):
+                self._color_jitter_brightness = float(transform.brightness)
+                self._color_jitter_contrast = float(transform.contrast)
+            elif isinstance(transform, Cutout):
+                if isinstance(transform.size, int):
+                    self._cutout_size = int(transform.size)
+                self._cutout_p = float(transform.p)
 
     def _load_data(self) -> tuple[np.ndarray, np.ndarray]:
         """Load CIFAR data using Hugging Face `datasets` or `tensorflow_datasets`.
@@ -604,7 +637,7 @@ class CIFARDataLoader(DataLoader):
         the whole batch, eliminating repeated JAX JIT dispatch overhead.
 
         Args:
-            batch_x: Float32 array of shape (B, C, H, W), already normalized.
+            batch_x: Float32 array of shape (B, C, H, W) in [0, 1].
 
         Returns:
             Augmented batch of same shape.
@@ -615,7 +648,7 @@ class CIFARDataLoader(DataLoader):
         B, C, H, W = batch_x.shape
 
         # --- Vectorized RandomCrop with padding=4 ---
-        if getattr(getattr(self, "_do_random_crop", None), "__bool__", lambda: True)():
+        if getattr(getattr(self, "_do_random_crop", None), "__bool__", lambda: False)():
             pad = 4
             # Pad spatial dims: (B, C, H+2p, W+2p)
             padded = np.pad(batch_x, ((0, 0), (0, 0), (pad, pad), (pad, pad)), mode="constant")
@@ -632,10 +665,55 @@ class CIFARDataLoader(DataLoader):
             batch_x = cropped
 
         # --- Vectorized RandomHorizontalFlip ---
-        flip_mask = self._rng.random(B) < 0.5  # (B,)
-        if np.any(flip_mask):
+        flip_p = float(getattr(self, "_random_flip_p", 0.0))
+        if flip_p > 0:
+            flip_mask = self._rng.random(B) < flip_p
             batch_x = batch_x.copy()
-            batch_x[flip_mask] = batch_x[flip_mask, :, :, ::-1]
+            if np.any(flip_mask):
+                batch_x[flip_mask] = batch_x[flip_mask, :, :, ::-1]
+
+        # --- Vectorized ColorJitter for 2D RGB images ---
+        brightness = float(getattr(self, "_color_jitter_brightness", 0.0))
+        contrast = float(getattr(self, "_color_jitter_contrast", 0.0))
+        if C == 3 and (brightness > 0.0 or contrast > 0.0):
+            if brightness > 0.0:
+                brightness_scale = self._rng.uniform(
+                    1.0 - brightness, 1.0 + brightness, size=(B, 1, 1, 1)
+                ).astype(batch_x.dtype)
+                batch_x = batch_x * brightness_scale
+            if contrast > 0.0:
+                contrast_scale = self._rng.uniform(
+                    1.0 - contrast, 1.0 + contrast, size=(B, 1, 1, 1)
+                ).astype(batch_x.dtype)
+                mean = batch_x.mean(axis=(2, 3), keepdims=True)
+                batch_x = (batch_x - mean) * contrast_scale + mean
+            batch_x = np.clip(batch_x, 0.0, 1.0)
+
+        # --- Vectorized Cutout ---
+        cutout_size = int(getattr(self, "_cutout_size", 0))
+        cutout_p = float(getattr(self, "_cutout_p", 0.0))
+        if cutout_size > 0 and cutout_p > 0.0:
+            apply_cutout = self._rng.random(B) < cutout_p
+            if np.any(apply_cutout):
+                batch_x = batch_x.copy()
+                cutout_size = min(cutout_size, H, W)
+                centers_h = self._rng.randint(0, H, size=B)
+                centers_w = self._rng.randint(0, W, size=B)
+                half = cutout_size // 2
+                for i in range(B):
+                    if not apply_cutout[i]:
+                        continue
+                    center_h = int(centers_h[i])
+                    center_w = int(centers_w[i])
+                    top_idx = center_h - half
+                    left_idx = center_w - half
+                    if top_idx < 0:
+                        top_idx = 0
+                    if left_idx < 0:
+                        left_idx = 0
+                    bottom_idx = min(H, top_idx + cutout_size)
+                    right_idx = min(W, left_idx + cutout_size)
+                    batch_x[i, :, top_idx:bottom_idx, left_idx:right_idx] = 0.0
 
         return batch_x
 
@@ -658,11 +736,10 @@ class CIFARDataLoader(DataLoader):
             batch_x = self.x[batch_indices].astype(np.float32)
             batch_y = self.y[batch_indices]
 
-            # Normalize
-            batch_x = _normalize_batch(batch_x, self.mean, self.std)
+            if self.transform is not None:
+                batch_x = self._augment_batch(batch_x)
 
-            # Vectorized batch augmentation (numpy-based, no per-sample Python loop)
-            batch_x = self._augment_batch(batch_x)
+            batch_x = _normalize_batch(batch_x, self.mean, self.std)
             yield {
                 "image": jnp.array(batch_x),
                 "label": jnp.array(batch_y),

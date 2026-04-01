@@ -1,0 +1,14 @@
+[
+  {
+    "job": 0,
+    "name": "cifar10_optimize_then_train",
+    "status": "completed",
+    "elapsed_seconds": 126959.4541978836
+  },
+  {
+    "job": 1,
+    "name": "modelnet40_optimize_then_train",
+    "status": "completed",
+    "elapsed_seconds": 4840.445226430893
+  }
+]

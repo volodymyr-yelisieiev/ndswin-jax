@@ -750,6 +750,14 @@ def create_augmentation_pipeline(
         if hasattr(config, "random_flip") and config.random_flip:
             transforms.append(RandomHorizontalFlip(p=0.5))
 
+        # Color jitter is only meaningful for 2D RGB images.
+        if (
+            getattr(config, "color_jitter", False)
+            and len(getattr(config, "image_size", ())) == 2
+            and getattr(config, "in_channels", 0) == 3
+        ):
+            transforms.append(ColorJitter(brightness=0.4, contrast=0.4))
+
         # Cutout
         if hasattr(config, "cutout_size") and config.cutout_size > 0:
             transforms.append(Cutout(config.cutout_size))

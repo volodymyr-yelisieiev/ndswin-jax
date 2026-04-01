@@ -5,7 +5,7 @@
 # =============================================================================
 CONFIG        ?= configs/cifar10.json
 SWEEP         ?= configs/sweeps/cifar10_hyperparam_sweep.yaml
-QUEUE_FILE    ?= configs/queues/queue_2d_3d.yaml
+QUEUE_FILE    ?= configs/queues/benchmark_2d_then_3d.yaml
 TRAIN_EPOCHS  ?= 100
 SWEEP_TRIALS  ?=
 SWEEP_OUTDIR  ?= outputs/sweeps/$(shell basename $(SWEEP) .yaml)
@@ -105,9 +105,9 @@ help:
 	@echo "  make optimize SWEEP_TRIALS=5 TRAIN_EPOCHS=50          # Quick optimization"
 	@echo "  make train CONFIG=configs/cifar10.json"
 	@echo "  make sweep SWEEP=configs/sweeps/cifar10_hyperparam_sweep.yaml SWEEP_TRIALS=10"
-	@echo "  make auto-sweep SWEEP=configs/sweeps/modelnet40_hyperparam_sweep.yaml TRAIN_EPOCHS=50"
+	@echo "  make auto-sweep SWEEP=configs/sweeps/modelnet40_stable_hyperparam_sweep.yaml TRAIN_EPOCHS=50"
 	@echo "  make fetch-data HF_DATASET=jxie/modelnet40 DATASET_DIR=data/modelnet40"
-	@echo "  make queue QUEUE_FILE=configs/queues/queue_2d_3d.yaml"
+	@echo "  make queue QUEUE_FILE=configs/queues/benchmark_2d_then_3d.yaml"
 	@echo "  make tensorboard"
 
 print-env-resolution:

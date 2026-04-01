@@ -1,0 +1,35 @@
+The central implementation task was to remove implicit 2D assumptions from the Swin pipeline while preserving the original architectural pattern. In the analyzed repository snapshot, the resulting model is exposed as \texttt{NDSwinTransformer} and configured through \texttt{num\_dims}, \texttt{patch\_size}, and \texttt{window\_size}. The model still follows the familiar Swin structure: patch embedding, multiple hierarchical transformer stages, and a classifier head. The difference is that spatial operators now work on tuples of arbitrary length instead of fixed height--width pairs.
+
+\begin{figure}[t]
+  \centering
+  \input{figures/architecture_overview}
+  \caption{Overview of the N-dimensional shifted-window pipeline used in NDSwin-JAX. The grouped middle blocks are the generic spatial operators: they reuse the same code path for 2D image windows and 3D voxel windows by reading \texttt{num\_dims}, \texttt{patch\_size}, and \texttt{window\_size} from configuration.}
+  \label{fig:architecture}
+\end{figure}
+
+At the model level, patch embedding converts channel-first tensors of shape \((B, C, *\text{spatial})\) into token grids whose dimensionality depends only on the configured patch size. The generalized window operators then partition tensors of shape \((B, *\text{spatial}, C)\) into local windows, reverse that partitioning after attention, and apply cyclic shifts along each spatial axis. Relative position bias indexing is likewise computed from the configured window shape. These are exactly the components that fail first in a Swin implementation that assumes only two spatial coordinates. Replacing those assumptions with tuple-based shape arithmetic lets the same attention block process both \(4 \times 4\) image windows and \(4 \times 4 \times 4\) voxel windows.
+
+The implementation also preserves the hierarchical structure of Swin. The model stacks multiple stages, each with its own depth, number of heads, and stochastic depth schedule. Between stages, patch merging reduces spatial resolution while increasing the embedding dimension. Because these transformations operate on generic spatial tuples, the same stage logic applies to both the CIFAR-10 model and the ModelNet40 model analyzed here. In practice, moving from 2D to 3D becomes a configuration change rather than an architectural rewrite.
+
+The project extends beyond the model definition into the training system. The repository's canonical interface is the \texttt{ndswin} CLI, which supports training, sweeps, auto-sweeps, queue execution, dataset export, and validation. This matters for reproducibility because the same command surface launches both the 2D and 3D workflows. In the preserved artifact set, a queue file schedules one auto-sweep-plus-retrain workflow for CIFAR-10 and one for ModelNet40. The evidence therefore covers both the model and the orchestration layer expected in a practical research project.
+
+\begin{table}[t]
+  \centering
+  \caption{Execution environment extracted from the preserved artifact set. The software versions are grounded in \texttt{pyproject.toml}; the runtime device selection is confirmed by the saved training logs.}
+  \label{tab:environment}
+  \begin{tabularx}{\linewidth}{@{}lY@{}}
+    \toprule
+    \textbf{Item} & \textbf{Value} \\
+    \midrule
+    CPU & Intel Xeon E5-2630 v4, 20 logical CPUs \\
+    GPU inventory & 4 \(\times\) NVIDIA GeForce GTX 1080 Ti, 11264 MiB each \\
+    RAM & 125 GiB system memory \\
+    Runtime device selection & 4 GPUs selected automatically for both preserved final training runs \\
+    Core software & JAX 0.7.1, jaxlib 0.7.1, Flax, Optax, Orbax checkpointing \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Training itself is implemented with JAX-based optimization and data-parallel sharding. The trainer constructs a JAX mesh over the visible devices and shards batches along the batch dimension using \texttt{NamedSharding}. This is relevant because the kept April logs show that the preserved final runs selected four GPUs automatically rather than relying on a manually fixed device list. The code chooses only devices that satisfy memory and utilization thresholds, so the report does not overstate the hardware actually used for the preserved experiments.
+
+Finally, the implementation includes guard rails around data and configuration. Dataset contracts are validated before training starts, the ModelNet40 export is described by a manifest containing split counts and class information, and the sweep and queue layers record summaries to JSON. These details matter scientifically because they make the evidence auditable. The results reported later are extracted from structured artifacts that preserve configuration, runtime metadata, and metric histories rather than from informal notes or screenshots.

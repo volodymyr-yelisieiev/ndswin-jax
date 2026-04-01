@@ -1,0 +1,45 @@
+trials: 48
+trialsmethod: random
+metric: val_accuracy
+budget_epochs: 60
+max_steps_per_epoch: 400
+trial_timeout_seconds: 5400
+output_dir: outputs/sweeps/cifar10_tuned_hyperparam_sweep
+base_config: configs/cifar10_tuned.json
+
+param_space:
+  training.learning_rate:
+    kind: log_uniform
+    min: 2e-4
+    max: 1.5e-3
+  training.batch_size:
+    kind: choice
+    values: [128]
+  model.drop_rate:
+    kind: choice
+    values: [0.0, 0.05, 0.1]
+  model.drop_path_rate:
+    kind: choice
+    values: [0.1, 0.2, 0.3]
+  training.weight_decay:
+    kind: log_uniform
+    min: 0.005
+    max: 0.08
+  training.label_smoothing:
+    kind: choice
+    values: [0.0, 0.05, 0.1]
+  training.warmup_epochs:
+    kind: choice
+    values: [5, 10, 15, 20, 30]
+  data.mixup_alpha:
+    kind: choice
+    values: [0.0, 0.1, 0.2, 0.4]
+  data.cutmix_alpha:
+    kind: choice
+    values: [0.0, 0.5, 1.0]
+  data.cutout_size:
+    kind: choice
+    values: [0, 8, 12]
+  data.color_jitter:
+    kind: choice
+    values: [false, true]

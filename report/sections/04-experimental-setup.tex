@@ -1,0 +1,31 @@
+The experiments in this report are restricted to the latest complete queue run preserved in the repository, which finished on April 1, 2026. This is intentional: the goal is to document what was actually built and measured in the final benchmark pass, not to mix evidence across superseded runs. All quantitative results therefore come from committed JSON summaries, metric histories, and training logs copied from that one queue execution.
+
+The first workload is CIFAR-10, a 10-class image classification task with \(32 \times 32\) RGB inputs \cite{krizhevsky2009cifar}. In the recorded final run, the split comprises 45{,}000 training samples, 5{,}000 validation samples, and 10{,}000 test samples. The saved experiment evaluates the validation split at the end of training, so the report treats the test split as unused supporting context rather than as a source of headline metrics. The selected retraining configuration uses \texttt{num\_dims = 2}, a patch size of \(2 \times 2\), a window size of \(4 \times 4\), and an embedding dimension of 96.
+
+The second workload is a voxelized ModelNet40 export \cite{wu20153dshapenets}. The repository manifest describes 8{,}858 training samples, 985 validation samples, and 2{,}468 test samples, with one input channel and a spatial resolution of \(32^3\). This experiment uses \texttt{num\_dims = 3}, which activates the generalized 3D path in patch embedding, window partitioning, shifting, and patch merging. The selected retraining configuration uses an embedding dimension of 72, showing that the stabilized 3D sweep did not select the smallest architecture variant.
+
+\paragraph{Selected retraining configurations.}
+\begin{itemize}
+  \item \textbf{CIFAR-10:} patch size \(2 \times 2\), window size \(4 \times 4\), embed dimension 96, batch size 128, learning rate 0.0004535939, weight decay 0.0610406981, drop rate 0.0, drop path 0.2, warmup 20 epochs, mixup 0.0, cutmix 0.5, cutout 8, color jitter enabled.
+  \item \textbf{ModelNet40:} patch size \(2 \times 2 \times 2\), window size \(4 \times 4 \times 4\), embed dimension 72, batch size 64, learning rate 0.0012622739, weight decay 0.0070498347, drop rate 0.0, drop path 0.2, warmup 3 epochs.
+\end{itemize}
+
+Hyperparameter search is performed through configuration-driven random search. The CIFAR-10 sweep evaluates 48 trials with validation accuracy as the selection metric and a 60-epoch budget per trial. All 48 trials completed successfully. The ModelNet40 sweep evaluates 15 trials with the same metric and a 10-epoch budget per trial, and all 15 trials completed successfully as well. This is important because it shows that the later stable pipeline no longer suffered from the invalid warmup schedules that had affected earlier exploratory 3D sweeps.
+
+\begin{figure}[t]
+  \centering
+  \input{figures/cifar10_sweep_plot}
+  \caption{Validation accuracy across the 48 CIFAR-10 sweep trials in the kept April 1 queue run. The highlighted star marks the best recorded trial, which reached 0.7438 under the 60-epoch sweep budget.}
+  \label{fig:cifar-sweep}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \input{figures/modelnet40_sweep_plot}
+  \caption{Validation accuracy across the 15 ModelNet40 sweep trials in the kept April 1 queue run. The highlighted star marks the best recorded trial, and the absence of failed trials confirms that the stabilized sweep space removed the earlier invalid warmup combinations.}
+  \label{fig:modelnet-sweep}
+\end{figure}
+
+After sweep selection, each task is retrained with the best saved configuration. For CIFAR-10, the queue launches the final retraining with 600 requested epochs, but early stopping terminates the run at epoch 152 and restores the best validation checkpoint from epoch 112. For ModelNet40, the queue launches the final retraining with 200 requested epochs, early stopping terminates the run at epoch 26, and the best validation checkpoint is restored from epoch 6. The early-stopped best state, not the nominal epoch budget, therefore determines the final preserved validation metric.
+
+The experiments were executed through the repository's queue mechanism, which is itself part of the practical contribution. The queue log records two completed jobs: a CIFAR-10 auto-sweep-plus-retrain job with a total elapsed time of 126{,}959.45 seconds and a ModelNet40 auto-sweep-plus-retrain job with a total elapsed time of 4{,}840.45 seconds. These workflow-level numbers show that the project supports unattended, sequential benchmarking across dimensionalities. The committed extraction inputs are listed in \autoref{app:artifacts}.

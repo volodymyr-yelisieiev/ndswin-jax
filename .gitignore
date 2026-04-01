@@ -143,6 +143,8 @@ cython_debug/
 # IDEs
 .idea/
 .vscode/
+.codex
+.codex/
 *.swp
 *.swo
 *~
@@ -163,6 +165,8 @@ configs/auto_best/
 logs/
 outputs/
 data/
+!report/data/
+!report/data/**
 *.ckpt
 *.pt
 *.pth

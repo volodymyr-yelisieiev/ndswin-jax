@@ -31,7 +31,7 @@ jobs:
   # Example 2: 3D voxel classification sweep + train
   - name: modelnet40_sweep_and_train
     type: auto-sweep
-    sweep: configs/sweeps/modelnet40_hyperparam_sweep.yaml
+    sweep: configs/sweeps/modelnet40_stable_hyperparam_sweep.yaml
     trials: 12
     train_epochs: 100
     retries: 1

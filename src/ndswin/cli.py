@@ -521,16 +521,16 @@ def sample_value(spec: dict[str, Any]) -> Any:
 
 
 def materialize_experiment(base: Any, sampled: dict[str, Any], budget_epochs: int) -> Any:
-    from .config import NDSwinConfig
+    from .config import ExperimentConfig
 
     exp = deepcopy(base)
     apply_path_overrides(exp, list(sampled.items()))
     exp.training.epochs = int(budget_epochs)
     if hasattr(exp.training, "warmup_epochs"):
-        exp.training.warmup_epochs = max(
-            0,
-            min(int(exp.training.warmup_epochs), int(exp.training.epochs)),
-        )
+        warmup_epochs = int(exp.training.warmup_epochs)
+        if "training.warmup_epochs" in sampled and warmup_epochs >= int(exp.training.epochs):
+            raise ValueError("Sampled warmup_epochs must be less than budget_epochs")
+        exp.training.warmup_epochs = max(0, min(warmup_epochs, int(exp.training.epochs) - 1))
 
     if getattr(exp.data, "dataset", "").lower() == "cifar100":
         exp.training.num_classes = 100
@@ -570,11 +570,44 @@ def materialize_experiment(base: Any, sampled: dict[str, Any], budget_epochs: in
         exp.model.drop_path_rate = coerce_number(exp.model.drop_path_rate)
 
     try:
-        _ = NDSwinConfig.from_dict(exp.model.to_dict())
+        return ExperimentConfig.from_dict(exp.to_dict())
     except Exception as exc:  # pragma: no cover - validation depends on sampled values
-        raise ValueError(f"Invalid model configuration after sampling: {exc}") from exc
+        raise ValueError(f"Invalid sampled configuration: {exc}") from exc
 
-    return exp
+
+def sample_valid_experiment(
+    base: Any,
+    space: dict[str, Any],
+    budget_epochs: int,
+    *,
+    max_attempts: int = 100,
+) -> tuple[Any, int, dict[str, int]]:
+    """Sample and validate a sweep configuration before any runtime launch."""
+    rejection_reasons: dict[str, int] = {}
+
+    for attempt in range(1, max_attempts + 1):
+        sampled = {key: sample_value(spec) for key, spec in space.items()}
+        if "model.embed_dim" in sampled and isinstance(sampled["model.embed_dim"], str):
+            with suppress(ValueError):
+                sampled["model.embed_dim"] = int(float(sampled["model.embed_dim"]))
+        try:
+            exp = materialize_experiment(base, sampled, budget_epochs)
+            _ = exp.model
+            return exp, attempt, rejection_reasons
+        except Exception as exc:
+            reason = str(exc)
+            rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+            logger.debug(
+                "Sampled invalid config on attempt %d/%d: %s; resampling...",
+                attempt,
+                max_attempts,
+                exc,
+            )
+
+    raise ValueError(
+        f"Could not find valid config after {max_attempts} attempts. "
+        f"Rejections: {rejection_reasons}"
+    )
 
 
 def build_sweep_summary_payload(
@@ -585,6 +618,8 @@ def build_sweep_summary_payload(
     budget_epochs: int,
     outdir: Path,
     dry_run: bool,
+    sampling_rejections: int = 0,
+    rejection_reasons: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build a sweep summary payload with selection metadata."""
     return {
@@ -593,6 +628,8 @@ def build_sweep_summary_payload(
         "budget_epochs": budget_epochs,
         "output_dir": str(outdir),
         "mode": "dry-run" if dry_run else "run",
+        "sampling_rejections": sampling_rejections,
+        "rejection_reasons": rejection_reasons or {},
         "results": results,
     }
 
@@ -606,6 +643,8 @@ def write_sweep_summary(
     budget_epochs: int,
     outdir: Path,
     dry_run: bool,
+    sampling_rejections: int = 0,
+    rejection_reasons: dict[str, int] | None = None,
 ) -> None:
     """Write a sweep summary payload to disk."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -618,6 +657,8 @@ def write_sweep_summary(
                 budget_epochs=budget_epochs,
                 outdir=outdir,
                 dry_run=dry_run,
+                sampling_rejections=sampling_rejections,
+                rejection_reasons=rejection_reasons,
             ),
             indent=2,
         )
@@ -740,6 +781,7 @@ def run_trial(
         }
 
     max_steps = str((sweep_config or {}).get("max_steps_per_epoch", 200))
+    trial_timeout_seconds = float((sweep_config or {}).get("trial_timeout_seconds", 1800))
     train_cmd = build_cli_invocation(
         "train",
         "--config",
@@ -766,7 +808,7 @@ def run_trial(
                 stderr=subprocess.STDOUT,
                 check=True,
                 env=env,
-                timeout=1800,
+                timeout=trial_timeout_seconds,
             )
         status = "success"
     except subprocess.CalledProcessError as exc:
@@ -836,31 +878,51 @@ def run_sweep_command(args: argparse.Namespace) -> int:
     base_cfg_path = args.base_config or sweep.get("base_config")
     space = sweep.get("param_space", {})
     summary: list[dict[str, Any]] = []
+    sampling_rejections = 0
+    rejection_reasons: dict[str, int] = {}
+    max_sampling_attempts = 100
 
     logger.info("Starting sweep: %d trials, budget %d epochs, outdir=%s", trials, budget, outdir)
     if args.dry_run:
-        if base_cfg_path is not None:
-            base_raw = json.loads(Path(base_cfg_path).read_text())
-        else:
-            base_raw = {
-                "model": {"num_dims": 2, "embed_dim": 96, "drop_path_rate": 0.1},
-                "training": {"epochs": 100, "batch_size": 128, "learning_rate": 1e-3},
-                "data": {"dataset": "cifar10", "data_dir": "data", "image_size": [32, 32]},
-            }
+        base_exp = load_base_experiment(base_cfg_path)
 
         for idx in range(trials):
-            sampled = {key: sample_value(spec) for key, spec in space.items()}
-            conf = deepcopy(base_raw)
-            for path, value in sampled.items():
-                set_by_path(conf, path, value)
-            conf.setdefault("training", {})["epochs"] = int(budget)
+            try:
+                exp, sample_attempts, trial_rejections = sample_valid_experiment(
+                    base_exp,
+                    space,
+                    budget,
+                    max_attempts=max_sampling_attempts,
+                )
+                sampling_rejections += sum(trial_rejections.values())
+                for reason, count in trial_rejections.items():
+                    rejection_reasons[reason] = rejection_reasons.get(reason, 0) + count
+            except ValueError as exc:
+                result = {
+                    "trial": idx,
+                    "status": "error",
+                    "error": str(exc),
+                    "sample_attempts": max_sampling_attempts,
+                }
+                summary.append(result)
+                write_sweep_summary(
+                    outdir / "summary.json",
+                    summary,
+                    sweep=sweep,
+                    trials=trials,
+                    budget_epochs=budget,
+                    outdir=outdir,
+                    dry_run=True,
+                    sampling_rejections=sampling_rejections,
+                    rejection_reasons=rejection_reasons,
+                )
+                continue
+
             dataset_name = (
-                conf.get("data", {}).get("hf_id")
-                or conf.get("data", {}).get("dataset")
-                or "dataset"
+                getattr(exp.data, "hf_id", None) or getattr(exp.data, "dataset", None) or "dataset"
             )
             dataset_name = str(dataset_name).replace("/", "_").replace(":", "_")
-            stamp = conf.get("name", "dryrun") + "_dry"
+            stamp = f"{exp.name}_dry"
             base_dir = outdir / dataset_name / stamp
             if base_dir.exists():
                 shutil.rmtree(base_dir)
@@ -868,13 +930,14 @@ def run_sweep_command(args: argparse.Namespace) -> int:
             trial_dir = base_dir / f"trial_{idx:03d}"
             trial_dir.mkdir(parents=True, exist_ok=False)
             config_path = trial_dir / "config.json"
-            config_path.write_text(json.dumps(conf, indent=2))
+            config_path.write_text(json.dumps(exp.to_dict(), indent=2))
             result = {
                 "trial": idx,
                 "status": "dry",
                 "config_path": str(config_path),
                 "dataset": dataset_name,
                 "stamp": stamp,
+                "sample_attempts": sample_attempts,
             }
             summary.append(result)
             write_sweep_summary(
@@ -885,6 +948,8 @@ def run_sweep_command(args: argparse.Namespace) -> int:
                 budget_epochs=budget,
                 outdir=outdir,
                 dry_run=True,
+                sampling_rejections=sampling_rejections,
+                rejection_reasons=rejection_reasons,
             )
             write_sweep_summary(
                 outdir / "summary.json",
@@ -894,8 +959,10 @@ def run_sweep_command(args: argparse.Namespace) -> int:
                 budget_epochs=budget,
                 outdir=outdir,
                 dry_run=True,
+                sampling_rejections=sampling_rejections,
+                rejection_reasons=rejection_reasons,
             )
-        logger.info("Dry-run complete. Summary written to %s", base_dir / "summary.json")
+        logger.info("Dry-run complete. Summary written to %s", outdir / "summary.json")
         return 0
 
     base_exp = load_base_experiment(base_cfg_path)
@@ -905,33 +972,27 @@ def run_sweep_command(args: argparse.Namespace) -> int:
         logger.error("Dataset/config validation failed before sweep start: %s", exc)
         return 1
     for idx in range(trials):
-        max_attempts = 10
-        exp = None
-        trial_sampled: dict[str, Any]
-        for attempt in range(max_attempts):
-            trial_sampled = {key: sample_value(spec) for key, spec in space.items()}
-            if "model.embed_dim" in trial_sampled and isinstance(
-                trial_sampled["model.embed_dim"], str
-            ):
-                with suppress(ValueError):
-                    trial_sampled["model.embed_dim"] = int(float(trial_sampled["model.embed_dim"]))
-            try:
-                exp = materialize_experiment(base_exp, trial_sampled, budget)
-                _ = exp.model
-                break
-            except Exception as exc:
-                logger.debug(
-                    "Sampled invalid config on attempt %d/%d: %s; resampling...",
-                    attempt + 1,
-                    max_attempts,
-                    exc,
-                )
-        if exp is None:
-            err_msg = (
-                f"Skipping trial {idx}: could not find valid config after {max_attempts} attempts"
+        try:
+            exp, sample_attempts, trial_rejections = sample_valid_experiment(
+                base_exp,
+                space,
+                budget,
+                max_attempts=max_sampling_attempts,
             )
+            sampling_rejections += sum(trial_rejections.values())
+            for reason, count in trial_rejections.items():
+                rejection_reasons[reason] = rejection_reasons.get(reason, 0) + count
+        except ValueError as exc:
+            err_msg = f"Skipping trial {idx}: {exc}"
             logger.warning("%s", err_msg)
-            summary.append({"trial": idx, "status": "error", "error": err_msg})
+            summary.append(
+                {
+                    "trial": idx,
+                    "status": "error",
+                    "error": err_msg,
+                    "sample_attempts": max_sampling_attempts,
+                }
+            )
             write_sweep_summary(
                 outdir / "summary.json",
                 summary,
@@ -940,16 +1001,19 @@ def run_sweep_command(args: argparse.Namespace) -> int:
                 budget_epochs=budget,
                 outdir=outdir,
                 dry_run=False,
+                sampling_rejections=sampling_rejections,
+                rejection_reasons=rejection_reasons,
             )
             continue
 
         try:
             result = run_trial(idx, exp, outdir, dry_run=False, sweep_config=sweep)
+            result["sample_attempts"] = sample_attempts
             summary.append(result)
             summary_path = (
                 outdir
-                / result.get("dataset", "dataset")
-                / result.get("stamp", "stamp")
+                / str(result.get("dataset", "dataset"))
+                / str(result.get("stamp", "stamp"))
                 / "summary.json"
             )
             write_sweep_summary(
@@ -960,6 +1024,8 @@ def run_sweep_command(args: argparse.Namespace) -> int:
                 budget_epochs=budget,
                 outdir=outdir,
                 dry_run=False,
+                sampling_rejections=sampling_rejections,
+                rejection_reasons=rejection_reasons,
             )
         except Exception as exc:  # pragma: no cover - depends on runtime
             logger.error("Trial %d failed with exception: %s", idx, exc)
@@ -973,6 +1039,7 @@ def run_sweep_command(args: argparse.Namespace) -> int:
                     "status": "error",
                     "error": str(exc),
                     "traceback_file": str(error_path),
+                    "sample_attempts": sample_attempts,
                 }
             )
 
@@ -988,6 +1055,8 @@ def run_sweep_command(args: argparse.Namespace) -> int:
             budget_epochs=budget,
             outdir=outdir,
             dry_run=False,
+            sampling_rejections=sampling_rejections,
+            rejection_reasons=rejection_reasons,
         )
         write_sweep_summary(
             outdir / "summary.json",
@@ -997,6 +1066,8 @@ def run_sweep_command(args: argparse.Namespace) -> int:
             budget_epochs=budget,
             outdir=outdir,
             dry_run=False,
+            sampling_rejections=sampling_rejections,
+            rejection_reasons=rejection_reasons,
         )
 
         try:
