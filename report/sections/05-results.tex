@@ -1,0 +1,52 @@
+The most important result of this project is qualitative before it is quantitative: one codebase successfully trained on both a 2D image benchmark and a 3D voxel benchmark with no architecture rewrite between the two tasks. The same model family, training stack, and CLI workflow were reused across both workloads, with task-specific behavior determined by configuration. That is the core empirical validation of the N-dimensional implementation.
+
+For CIFAR-10, the 48-trial sweep completed without failures. The CLI-selected best sweep trial was trial 3, which achieved a validation accuracy of 0.7344 and a top-5 validation accuracy of 0.9672 under the 60-epoch sweep budget. After retraining the selected configuration with the longer schedule, the preserved best validation checkpoint reached a validation accuracy of 0.7480, a top-5 validation accuracy of 0.9762, and a validation loss of 0.8020. The run used 48{,}809{,}188 parameters and took 6{,}676.51 seconds end to end, with the best checkpoint found at epoch 136 before early stopping triggered at epoch 176. The training curves in \autoref{fig:cifar-training} show that the long retraining remained stable and modestly improved on the sweep-best validation score.
+
+For ModelNet40, the stabilized sweep is informative precisely because it no longer exposes invalid configuration failures. All 15 trials completed successfully, and the best sweep configuration, trial 11, achieved a validation accuracy of 0.8061 and a top-5 validation accuracy of 0.9499. Full retraining of that selected configuration did \emph{not} improve on the sweep-best score; instead, the preserved best validation checkpoint reached 0.7421, with a top-5 validation accuracy of 0.9306 and a validation loss of 0.9640. The final model used 16{,}423{,}126 parameters and completed in 990.99 seconds, with the best checkpoint found at epoch 7 and early stopping at epoch 27. This does \emph{not} imply that the architecture fails on 3D data. Rather, it shows that under this particular resumed run, the chosen long retraining schedule did not translate the sweep-best configuration into a stronger final checkpoint.
+
+\begin{figure}[t]
+  \centering
+  \input{figures/cifar10_training_plot}
+  \caption{Training history for the final CIFAR-10 retraining run. The dashed marker highlights the best restored checkpoint at epoch 136 with validation accuracy 0.7480; early stopping terminated the run at epoch 176.}
+  \label{fig:cifar-training}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \input{figures/modelnet40_training_plot}
+  \caption{Training history for the final ModelNet40 retraining run. The dashed marker highlights the best restored checkpoint at epoch 7 with validation accuracy 0.7421; early stopping stopped the run at epoch 27.}
+  \label{fig:modelnet-training}
+\end{figure}
+
+The comparison between sweep-best and final-retrain performance is summarized in \autoref{tab:summary-results}. In this latest artifact set, CIFAR-10 improves after full retraining, while ModelNet40 remains below its best short-budget sweep trial. That mixed outcome is informative. It shows that the orchestration pipeline is stable enough to complete both stages with traceable, repeatable artifact generation, but it also shows that a long retraining schedule is not automatically better than the best sweep checkpoint under the chosen configuration and stopping rules. The distinction between ``best sweep trial'' and ``best final retrain'' therefore needs to remain explicit. No error bars are shown because the preserved evidence for this submission consists of single retained runs rather than repeated-seed experiments.
+
+\begin{table}[t]
+  \centering
+  \small
+  \caption{Summary of the preserved validation results. Sweep metrics correspond to the best completed sweep trial; final metrics correspond to the best restored checkpoint after full retraining.}
+  \label{tab:summary-results}
+  \begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}l
+      S[table-format=1.4]
+      S[table-format=1.4]
+      S[table-format=1.4]
+      S[table-format=8.0]
+      S[table-format=4.2]
+      S[table-format=3.0]@{}}
+    \toprule
+    \textbf{Dataset} &
+    {\textbf{Sweep}} &
+    {\textbf{Final}} &
+    {\textbf{Top-5}} &
+    {\textbf{Parameters}} &
+    {\textbf{Time (s)}} &
+    {\textbf{Best Ep.}} \\
+    \midrule
+    CIFAR-10 & 0.7344 & 0.7480 & 0.9762 & 48809188 & 6676.51 & 136 \\
+    ModelNet40 & 0.8061 & 0.7421 & 0.9306 & 16423126 & 990.99 & 7 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+From a software engineering perspective, the workflow results are also meaningful. The CIFAR job completed in 124{,}965.6 seconds inside the benchmark queue, and the resumed ModelNet40 auto-sweep completed successfully in a separate tmux-backed run after the validation split was repaired. The saved logs also show that both final runs used four automatically selected GPUs rather than a manually fixed device list, which demonstrates basic resource awareness in the training pipeline.
+
+Overall, the results support a restrained but clear interpretation. NDSwin-JAX is not yet supported by the kind of repeated, test-set benchmark campaign that would justify strong state-of-the-art claims. Nevertheless, the preserved latest-run artifact set shows that the implementation is functional, configurable, and reusable across dimensionalities. The project succeeds as a practical work in applied machine learning engineering: it translates a known architecture into a broader implementation setting and validates that translation with credible, traceable experiments, while also revealing where retraining settings still need improvement.

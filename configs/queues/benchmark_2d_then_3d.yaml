@@ -1,0 +1,26 @@
+jobs:
+  - name: fetch_cifar10
+    type: fetch-data
+    hf_id: cifar10
+    outdir: data/cifar10
+    retries: 1
+
+  - name: fetch_modelnet40
+    type: fetch-data
+    hf_id: jxie/modelnet40
+    outdir: data/modelnet40
+    retries: 1
+
+  - name: cifar10_optimize_then_train
+    type: auto-sweep
+    sweep: configs/sweeps/cifar10_tuned_hyperparam_sweep.yaml
+    trials: 48
+    train_epochs: 600
+    retries: 1
+
+  - name: modelnet40_optimize_then_train
+    type: auto-sweep
+    sweep: configs/sweeps/modelnet40_stable_hyperparam_sweep.yaml
+    trials: 15
+    train_epochs: 200
+    retries: 1

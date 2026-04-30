@@ -1,0 +1,27 @@
+[
+  {
+    "job": 0,
+    "name": "fetch_cifar10",
+    "status": "completed",
+    "elapsed_seconds": 271.8312861919403
+  },
+  {
+    "job": 1,
+    "name": "fetch_modelnet40",
+    "status": "completed",
+    "elapsed_seconds": 527.227278470993
+  },
+  {
+    "job": 2,
+    "name": "cifar10_optimize_then_train",
+    "status": "completed",
+    "elapsed_seconds": 124965.58289051056
+  },
+  {
+    "job": 3,
+    "name": "modelnet40_optimize_then_train",
+    "status": "failed",
+    "error": "Command '['/system/user/studentwork/yelisiei/ndswin-jax/Environment/ndswin-jax/bin/python', '-m', 'ndswin.cli', 'auto-sweep', '--sweep', 'configs/sweeps/modelnet40_stable_hyperparam_sweep.yaml', '--trials', '15', '--train-epochs', '200']' returned non-zero exit status 1.",
+    "attempts": 2
+  }
+]
