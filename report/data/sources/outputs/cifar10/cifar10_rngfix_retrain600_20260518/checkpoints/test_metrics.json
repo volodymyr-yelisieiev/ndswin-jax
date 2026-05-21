@@ -1,0 +1,9 @@
+{
+  "checkpoint": "outputs/cifar10/cifar10_rngfix_retrain600_20260518/checkpoints/best.npz",
+  "split": "test",
+  "metrics": {
+    "accuracy": 0.8995000720024109,
+    "loss": 0.35184717178344727,
+    "top5_accuracy": 0.993600070476532
+  }
+}

@@ -28,6 +28,7 @@ from ndswin.training.scheduler import (
     LinearSchedule,
     WarmupSchedule,
 )
+from ndswin.training.trainer import create_train_state, effective_label_smoothing
 
 
 class TestLosses:
@@ -51,6 +52,17 @@ class TestLosses:
         loss = cross_entropy_loss(logits, labels)
 
         assert loss.shape == ()
+
+    def test_cross_entropy_sample_weight_masks_padding(self):
+        """Sample weights should remove padded examples from the loss."""
+        logits = jnp.array([[0.0, 10.0], [10.0, 0.0], [10.0, 0.0]])
+        labels = jnp.array([1, 0, 1])
+        weights = jnp.array([1.0, 1.0, 0.0])
+
+        weighted = cross_entropy_loss(logits, labels, sample_weight=weights)
+        expected = cross_entropy_loss(logits[:2], labels[:2])
+
+        assert jnp.allclose(weighted, expected)
 
     def test_label_smoothing(self):
         """Test label smoothing."""
@@ -96,6 +108,14 @@ class TestMetrics:
 
         assert jnp.isclose(acc, 1.0)
 
+    def test_accuracy_sample_weight_masks_padding(self):
+        """Padded samples should not change classification metrics."""
+        logits = jnp.array([[0.1, 0.9], [0.9, 0.1], [0.9, 0.1]])
+        labels = jnp.array([1, 0, 1])
+        weights = jnp.array([1.0, 1.0, 0.0])
+
+        assert jnp.isclose(accuracy(logits, labels, sample_weight=weights), 1.0)
+
     def test_top_k_accuracy(self):
         """Test top-k accuracy."""
         logits = jnp.array([[1.0, 2.0, 3.0, 4.0, 5.0]])
@@ -106,6 +126,14 @@ class TestMetrics:
 
         assert jnp.isclose(acc_1, 0.0)
         assert jnp.isclose(acc_2, 1.0)
+
+    def test_top_k_accuracy_sample_weight_masks_padding(self):
+        """Padded samples should not change top-k metrics."""
+        logits = jnp.array([[0.0, 1.0, 2.0], [2.0, 1.0, 0.0], [2.0, 1.0, 0.0]])
+        labels = jnp.array([2, 0, 1])
+        weights = jnp.array([1.0, 1.0, 0.0])
+
+        assert jnp.isclose(top_k_accuracy(logits, labels, k=1, sample_weight=weights), 1.0)
 
     def test_metric_tracker(self):
         """Test MetricTracker."""
@@ -294,3 +322,48 @@ class TestTrainerBestState:
         assert trainer.best_metric_value == 0.8
         assert trainer.best_metrics is not None
         assert trainer.best_metrics["accuracy"] == 0.8
+
+
+def test_create_train_state_preserves_model_drop_path_rate():
+    """Model drop_path_rate should remain the architecture source of truth."""
+    from ndswin.config import NDSwinConfig, TrainingConfig
+    from ndswin.models.swin import NDSwinTransformer
+
+    model_config = NDSwinConfig(
+        num_dims=2,
+        patch_size=(2, 2),
+        window_size=(2, 2),
+        embed_dim=12,
+        depths=(1,),
+        num_heads=(3,),
+        num_classes=10,
+        drop_path_rate=0.4,
+    )
+    model = NDSwinTransformer(model_config)
+    training_config = TrainingConfig(
+        epochs=2,
+        warmup_epochs=0,
+        batch_size=4,
+        stochastic_depth_rate=0.1,
+        num_classes=10,
+    )
+
+    create_train_state(
+        model,
+        training_config,
+        jax.random.PRNGKey(0),
+        input_shape=(3, 8, 8),
+        num_steps=1,
+        num_train_samples=4,
+    )
+
+    assert model.config.drop_path_rate == 0.4
+
+
+def test_effective_label_smoothing_skips_soft_labels():
+    """Mixup/cutmix soft targets should not be smoothed a second time."""
+    hard_labels = jnp.array([0, 1])
+    soft_labels = jnp.array([[0.7, 0.3], [0.2, 0.8]])
+
+    assert effective_label_smoothing(hard_labels, 0.1) == 0.1
+    assert effective_label_smoothing(soft_labels, 0.1) == 0.0

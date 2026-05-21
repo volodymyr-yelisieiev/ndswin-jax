@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from train.train import setup_output_dirs
@@ -17,6 +18,23 @@ def test_setup_output_dirs(tmp_path: Path):
 
     assert str(checkdir).endswith("checkpoints")
     assert str(cfgdir).endswith(".log")
+
+
+def test_setup_output_dirs_writes_effective_config(tmp_path: Path, monkeypatch):
+    config = ExperimentConfig()
+    config.training.epochs = 600
+
+    source_config = tmp_path / "source.json"
+    source_config.write_text(json.dumps({"training": {"epochs": 50}}))
+
+    monkeypatch.chdir(tmp_path)
+    checkpoint_dir, _ = setup_output_dirs(config, str(source_config), stamp="effective_stamp")
+
+    run_config = json.loads((checkpoint_dir.parent / "config.json").read_text())
+    source_copy = json.loads((checkpoint_dir.parent / "source_config.json").read_text())
+
+    assert run_config["training"]["epochs"] == 600
+    assert source_copy["training"]["epochs"] == 50
 
 
 def test_trainer_tensorboard_init(tmp_path: Path):

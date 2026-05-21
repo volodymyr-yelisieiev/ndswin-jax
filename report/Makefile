@@ -8,7 +8,7 @@ BIBER ?= bibtex
 .PHONY: refresh-data pdf clean
 
 refresh-data:
-	$(PYTHON) extract_report_data.py --sync --sync-latest
+	$(PYTHON) extract_report_data.py --sync
 
 pdf:
 	$(XELATEX) -interaction=nonstopmode $(TEX)

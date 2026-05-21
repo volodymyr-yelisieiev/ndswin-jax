@@ -13,6 +13,7 @@ def cross_entropy_loss(
     logits: Array,
     labels: Array,
     label_smoothing: float = 0.0,
+    sample_weight: Array | None = None,
 ) -> LossValue:
     """Compute cross-entropy loss.
 
@@ -21,6 +22,8 @@ def cross_entropy_loss(
         labels: Ground truth labels of shape (B,) (class indices) or
             (B, num_classes) (one-hot or soft labels).
         label_smoothing: Label smoothing coefficient.
+        sample_weight: Optional per-example weights. This is used to mask
+            padded samples in distributed batches.
 
     Returns:
         Scalar loss value.
@@ -39,6 +42,10 @@ def cross_entropy_loss(
 
     # Cross-entropy
     loss = -jnp.sum(labels * log_probs, axis=-1)
+
+    if sample_weight is not None:
+        sample_weight = sample_weight.astype(loss.dtype)
+        return jnp.sum(loss * sample_weight) / jnp.maximum(jnp.sum(sample_weight), 1.0)
 
     return jnp.mean(loss)
 

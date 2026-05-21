@@ -25,6 +25,7 @@ from ndswin.utils.logging import get_logger
 
 logger = get_logger("data")
 CLASSIFICATION_FILE_EXTS = {".npy", ".npz"}
+MAX_RANDOM_STATE_SEED = 2**32 - 1
 ARRAY_FOLDER_DATASETS = {
     "array",
     "array_folder",
@@ -449,7 +450,12 @@ class DataLoader(ABC):
         self.drop_last = drop_last
         self.num_workers = num_workers
         self.seed = seed
-        self._rng = np.random.RandomState(seed)
+        self._rng_epoch = 0
+        self._rng = np.random.RandomState(self._seed_for_epoch(self._rng_epoch))
+
+    def _seed_for_epoch(self, epoch: int) -> int:
+        """Derive a valid RandomState seed for a deterministic epoch index."""
+        return int((int(self.seed) + int(epoch)) % MAX_RANDOM_STATE_SEED)
 
     @abstractmethod
     def __len__(self) -> int:
@@ -467,9 +473,23 @@ class DataLoader(ABC):
         """Return dataset information."""
         pass
 
-    def reset(self) -> None:
-        """Reset the data loader state."""
-        self._rng = np.random.RandomState(self.seed)
+    def reset(self, advance_epoch: bool | None = None) -> None:
+        """Reset the data loader RNG.
+
+        Shuffled loaders advance to an epoch-specific seed by default so train
+        shuffling and stochastic augmentations do not repeat identically after
+        every epoch. Non-shuffled loaders rewind to the base seed, preserving
+        deterministic evaluation.
+        """
+        if advance_epoch is None:
+            advance_epoch = self.shuffle
+
+        if advance_epoch:
+            self._rng_epoch += 1
+        else:
+            self._rng_epoch = 0
+
+        self._rng = np.random.RandomState(self._seed_for_epoch(self._rng_epoch))
 
 
 def _reshape_channel_stats(
@@ -522,6 +542,8 @@ class CIFARDataLoader(DataLoader):
         mean: tuple[float, ...] = (0.5, 0.5, 0.5),
         std: tuple[float, ...] = (0.5, 0.5, 0.5),
         num_classes: int = 10,
+        val_split: float = 0.1,
+        normalize: bool = True,
     ) -> None:
         super().__init__(batch_size, shuffle, drop_last, 0, seed)
         self.name = name
@@ -532,6 +554,8 @@ class CIFARDataLoader(DataLoader):
         self.mean = mean
         self.std = std
         self.num_classes = num_classes
+        self.val_split = val_split
+        self.normalize = normalize
         self._do_random_crop = False
         self._random_flip_p = 0.0
         self._color_jitter_brightness = 0.0
@@ -542,17 +566,32 @@ class CIFARDataLoader(DataLoader):
 
         self.x, self.y = self._load_data()
 
-        # Implement 90/10 train/val split for CIFAR if needed
         if self.split in ["train", "validation"]:
-            val_size = 5000 if self.num_classes == 10 else 5000  # 10% of 50k
-            if self.split == "validation":
-                self.x = self.x[-val_size:]
-                self.y = self.y[-val_size:]
-            else:
-                self.x = self.x[:-val_size]
-                self.y = self.y[:-val_size]
+            train_indices, val_indices = self._stratified_train_val_indices(self.y)
+            split_indices = val_indices if self.split == "validation" else train_indices
+            self.x = self.x[split_indices]
+            self.y = self.y[split_indices]
 
         self.num_samples = len(self.x)
+
+    def _stratified_train_val_indices(self, labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Build a deterministic stratified split from the source train split."""
+        rng = np.random.RandomState(self._seed_for_epoch(0))
+        train_indices: list[int] = []
+        val_indices: list[int] = []
+
+        for cls in range(self.num_classes):
+            cls_indices = np.flatnonzero(labels == cls)
+            if cls_indices.size == 0:
+                continue
+            shuffled = cls_indices.copy()
+            rng.shuffle(shuffled)
+            cls_val_count = int(round(cls_indices.size * self.val_split))
+            cls_val_count = min(max(cls_val_count, 1), cls_indices.size - 1)
+            val_indices.extend(shuffled[:cls_val_count])
+            train_indices.extend(shuffled[cls_val_count:])
+
+        return np.sort(np.asarray(train_indices)), np.sort(np.asarray(val_indices))
 
     def _configure_transform_flags(self) -> None:
         """Extract supported fast-path augmentations from the configured transform."""
@@ -745,7 +784,8 @@ class CIFARDataLoader(DataLoader):
             if self.transform is not None:
                 batch_x = self._augment_batch(batch_x)
 
-            batch_x = _normalize_batch(batch_x, self.mean, self.std)
+            if self.normalize:
+                batch_x = _normalize_batch(batch_x, self.mean, self.std)
             yield {
                 "image": jnp.array(batch_x),
                 "label": jnp.array(batch_y),
@@ -1572,14 +1612,28 @@ def create_data_loader(
         "split": normalized_split,
         "batch_size": bs,
         "shuffle": is_train,
+        "drop_last": config.drop_last if is_train else False,
         "download": config.download,
         "transform": train_transform,
+        "seed": config.seed,
     }
 
     if ds == "cifar10":
-        return CIFAR10DataLoader(**kwargs)
+        return CIFAR10DataLoader(
+            **kwargs,
+            mean=config.mean,
+            std=config.std,
+            val_split=config.val_split,
+            normalize=config.normalize,
+        )
     elif ds == "cifar100":
-        return CIFAR100DataLoader(**kwargs)
+        return CIFAR100DataLoader(
+            **kwargs,
+            mean=config.mean,
+            std=config.std,
+            val_split=config.val_split,
+            normalize=config.normalize,
+        )
     elif ds in ARRAY_FOLDER_DATASETS:
         # Generic N-D array folder data loader expects class subfolders per split.
         return VolumeFolderDataLoader(
@@ -1588,7 +1642,7 @@ def create_data_loader(
             split=normalized_split,
             batch_size=bs,
             shuffle=is_train,
-            seed=42,
+            seed=config.seed,
             in_channels=config.in_channels,
             image_size=config.image_size,
             mean=config.mean,
@@ -1609,7 +1663,7 @@ def create_data_loader(
             split=requested_split,
             batch_size=bs,
             shuffle=is_train,
-            seed=42,
+            seed=config.seed,
             in_channels=config.in_channels,
             image_size=config.image_size,
             mean=config.mean,
@@ -1662,30 +1716,11 @@ def create_data_loader(
                     try:
                         subprocess.check_call(cmd)
                     except subprocess.CalledProcessError as cpe:
-                        print(
-                            f"Export failed: {cpe}; falling back to synthetic data loader for testing."
-                        )
-                        # Fallback to synthetic data so sweep can continue in environments where HF webdataset isn't supported
-                        if getattr(config, "task", "classification") == "segmentation":
-                            input_shape = (config.in_channels,) + tuple(config.image_size)
-                            return SyntheticSegmentationDataLoader(
-                                num_samples=100,
-                                input_shape=input_shape,
-                                num_classes=getattr(config, "num_classes", 2),
-                                batch_size=bs,
-                                shuffle=(split == "train"),
-                                seed=42,
-                            )
-                        else:
-                            input_shape = (config.in_channels,) + tuple(config.image_size)
-                            return SyntheticDataLoader(
-                                num_samples=1000,
-                                input_shape=input_shape,
-                                num_classes=getattr(config, "num_classes", 10),
-                                batch_size=bs,
-                                shuffle=(split == "train"),
-                                seed=42,
-                            )
+                        raise RuntimeError(
+                            "Automatic Hugging Face export failed; refusing to train on "
+                            "synthetic fallback data. Run `ndswin fetch-data` manually or "
+                            "fix the dataset/export configuration before training."
+                        ) from cpe
                 # Use NumpySegmentationFolderDataLoader if segmentation
                 return NumpySegmentationFolderDataLoader(
                     name=config.dataset,

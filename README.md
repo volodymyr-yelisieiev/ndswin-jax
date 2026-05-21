@@ -18,6 +18,18 @@ A pure JAX/Flax implementation of the Swin Transformer, generalized to support *
 - **Job Queue**: Run sequential sweep→train pipelines for multiple datasets automatically.
 - **Point Cloud → Voxel**: Automatic voxelization of point cloud datasets.
 
+## Published Results and Weights
+
+The final restored-best checkpoints from the preserved practical-work artifact set are available on the Hugging Face Hub:
+
+| Dataset | Final val top-1 | Test top-1 | Test top-5 | Weights |
+|---|---:|---:|---:|---|
+| CIFAR-10 | 91.82% | 89.95% | 99.36% | [ndswin-cifar10-final](https://huggingface.co/volodymyr-yelisieiev/ndswin-cifar10-final) |
+| CIFAR-100 | 69.48% | 69.63% | 88.19% | [ndswin-cifar100-final](https://huggingface.co/volodymyr-yelisieiev/ndswin-cifar100-final) |
+| ModelNet40 voxels | 74.21% | 69.65% | 91.49% | [ndswin-modelnet40-final](https://huggingface.co/volodymyr-yelisieiev/ndswin-modelnet40-final) |
+
+All checkpoints were selected by validation accuracy. Test metrics were recomputed afterward from the restored checkpoint and are included in each model repository as `test_metrics.json`.
+
 ## Quick Start
 
 ### 1. Setup
@@ -247,6 +259,7 @@ make clean-all
 ndswin-jax/
 ├── configs/                    # Experiment configs
 │   ├── cifar10.json          # 2D classification
+│   ├── cifar100_tuned.json   # CIFAR-100 tuned 2D classification
 │   ├── modelnet10.json        # True ModelNet10 template
 │   ├── modelnet40.json        # ModelNet40 example
 │   ├── sweeps/                # Hyperparameter sweep configs
@@ -270,7 +283,7 @@ ndswin-jax/
 ## Testing
 
 ```bash
-# Run full test suite (203 tests)
+# Run full test suite
 make test
 
 # Quick check

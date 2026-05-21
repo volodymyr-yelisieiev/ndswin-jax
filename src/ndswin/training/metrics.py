@@ -13,6 +13,7 @@ from ndswin.types import Array, MetricValue
 def accuracy(
     logits: Array,
     labels: Array,
+    sample_weight: Array | None = None,
 ) -> MetricValue:
     """Compute classification accuracy.
 
@@ -28,13 +29,19 @@ def accuracy(
     if labels.ndim > 1:
         labels = jnp.argmax(labels, axis=-1)
 
-    return jnp.mean(predictions == labels)
+    correct = (predictions == labels).astype(jnp.float32)
+    if sample_weight is not None:
+        sample_weight = sample_weight.astype(correct.dtype)
+        return jnp.sum(correct * sample_weight) / jnp.maximum(jnp.sum(sample_weight), 1.0)
+
+    return jnp.mean(correct)
 
 
 def top_k_accuracy(
     logits: Array,
     labels: Array,
     k: int = 5,
+    sample_weight: Array | None = None,
 ) -> MetricValue:
     """Compute top-k accuracy.
 
@@ -53,7 +60,11 @@ def top_k_accuracy(
     top_k_preds = jnp.argsort(logits, axis=-1)[:, -k:]
 
     # Check if true label is in top-k
-    correct = jnp.any(top_k_preds == labels[:, None], axis=-1)
+    correct = jnp.any(top_k_preds == labels[:, None], axis=-1).astype(jnp.float32)
+
+    if sample_weight is not None:
+        sample_weight = sample_weight.astype(correct.dtype)
+        return jnp.sum(correct * sample_weight) / jnp.maximum(jnp.sum(sample_weight), 1.0)
 
     return jnp.mean(correct)
 

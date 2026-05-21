@@ -1,0 +1,48 @@
+{
+  "name": "cifar100_tuned",
+  "description": "High-budget CIFAR-100 classification recipe for tuned 2D NDSwin validation runs",
+  "model": {
+    "num_dims": 2,
+    "patch_size": [2, 2],
+    "embed_dim": 96,
+    "depths": [2, 2, 18, 2],
+    "num_heads": [3, 6, 12, 24],
+    "window_size": [4, 4],
+    "in_channels": 3,
+    "num_classes": 100,
+    "drop_rate": 0.05,
+    "drop_path_rate": 0.2
+  },
+  "training": {
+    "epochs": 600,
+    "batch_size": 128,
+    "learning_rate": 0.0006,
+    "weight_decay": 0.04,
+    "optimizer": "adamw",
+    "lr_schedule": "cosine",
+    "warmup_epochs": 20,
+    "label_smoothing": 0.1,
+    "early_stopping": true,
+    "patience": 50,
+    "min_delta": 0.00005,
+    "num_classes": 100
+  },
+  "data": {
+    "dataset": "cifar100",
+    "data_dir": "data/cifar100",
+    "image_size": [32, 32],
+    "in_channels": 3,
+    "task": "classification",
+    "mean": [0.5071, 0.4867, 0.4408],
+    "std": [0.2675, 0.2565, 0.2761],
+    "augmentation": true,
+    "random_crop": true,
+    "random_flip": true,
+    "mixup_alpha": 0.4,
+    "cutmix_alpha": 1.0,
+    "cutout_size": 8,
+    "random_rotation": 0.0,
+    "color_jitter": true,
+    "auto_augment": false
+  }
+}

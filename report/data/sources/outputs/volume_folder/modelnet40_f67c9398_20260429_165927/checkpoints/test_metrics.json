@@ -1,0 +1,9 @@
+{
+  "checkpoint": "outputs/volume_folder/modelnet40_f67c9398_20260429_165927/checkpoints/best.npz",
+  "split": "test",
+  "metrics": {
+    "accuracy": 0.6965153813362122,
+    "loss": 1.1200991868972778,
+    "top5_accuracy": 0.9149108529090881
+  }
+}

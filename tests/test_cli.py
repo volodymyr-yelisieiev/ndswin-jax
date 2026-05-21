@@ -460,7 +460,9 @@ def test_export_weights_creates_hf_ready_bundle(tmp_path: Path):
     config_path = run_dir / "config.json"
     checkpoint_path = checkpoint_dir / "best.npz"
     metrics_path = checkpoint_dir / "metrics.json"
-    config_path.write_text(json.dumps({"name": "demo", "model": {"num_dims": 2}}))
+    config_path.write_text(
+        json.dumps({"name": "stale-demo", "model": {"num_dims": 2, "drop_path_rate": 0.3}})
+    )
     checkpoint_path.write_bytes(b"fake checkpoint")
     metrics_path.write_text(
         json.dumps(
@@ -470,7 +472,7 @@ def test_export_weights_creates_hf_ready_bundle(tmp_path: Path):
                 "best_metric_name": "val_accuracy",
                 "best_metric_value": 0.75,
                 "final_metrics": {"accuracy": 0.75},
-                "config": {"name": "demo"},
+                "config": {"name": "demo", "model": {"num_dims": 2, "drop_path_rate": 0.1}},
             }
         )
     )
@@ -490,8 +492,12 @@ def test_export_weights_creates_hf_ready_bundle(tmp_path: Path):
     assert (outdir / "config.json").exists()
     assert (outdir / "metrics.json").exists()
     assert (outdir / "README.md").exists()
+    exported_config = json.loads((outdir / "config.json").read_text())
+    assert exported_config["name"] == "demo"
+    assert exported_config["model"]["drop_path_rate"] == 0.1
     manifest = json.loads((outdir / "export_manifest.json").read_text())
     assert manifest["hf_repo_id"] == "volodymyr-yelisieiev/ndswin-demo"
+    assert manifest["source_config"] == "metrics.config"
     assert manifest["pushed_to_hub"] is False
 
 

@@ -545,6 +545,7 @@ class DataConfig:
     shuffle_buffer_size: int = 10000
     pin_memory: bool = True
     drop_last: bool = True
+    seed: int = 42
 
     # Splits
     train_split: float = 0.8

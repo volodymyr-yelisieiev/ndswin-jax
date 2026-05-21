@@ -208,6 +208,8 @@ def apply_train_overrides(exp_config: Any, args: argparse.Namespace) -> None:
         exp_config.training.learning_rate = args.lr
     if args.seed is not None:
         exp_config.training.seed = args.seed
+        if hasattr(exp_config.data, "seed"):
+            exp_config.data.seed = args.seed
     if args.data_dir is not None:
         exp_config.data.data_dir = args.data_dir
     apply_path_overrides(exp_config, args.overrides)
@@ -229,8 +231,12 @@ def setup_output_dirs(
     checkpoint_dir = Path("outputs") / dataset_name / stamp / "checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    config_copy_path = Path("outputs") / dataset_name / stamp / "config.json"
-    shutil.copy(config_path, config_copy_path)
+    run_dir = checkpoint_dir.parent
+    config_copy_path = run_dir / "config.json"
+    config_copy_path.write_text(json.dumps(exp_config.to_dict(), indent=2))
+    source_path = Path(config_path)
+    if source_path.exists():
+        shutil.copy(config_path, run_dir / "source_config.json")
 
     logs_dir = Path("logs") / dataset_name
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -1794,6 +1800,13 @@ def find_summary_files(outputs_dir: Path) -> list[Path]:
 
 
 def infer_summary_metric(summary_path: Path) -> str | None:
+    try:
+        summary_data = json.loads(summary_path.read_text())
+        if isinstance(summary_data, dict) and isinstance(summary_data.get("metric"), str):
+            return cast(str, summary_data["metric"])
+    except Exception:
+        pass
+
     sweep_root = next(
         (parent for parent in summary_path.parents if parent.parent.name == "sweeps"),
         None,
@@ -1890,11 +1903,15 @@ def run_export_weights_command(args: argparse.Namespace) -> int:
             else metrics_path.parent.parent / "config.json"
         )
     )
+    embedded_config = metrics_data.get("config")
+    use_embedded_config = (
+        args.config is None and isinstance(embedded_config, dict) and bool(embedded_config)
+    )
 
     if not checkpoint_path.exists():
         logger.error("Checkpoint not found: %s", checkpoint_path)
         return 1
-    if not config_path.exists():
+    if not use_embedded_config and not config_path.exists():
         logger.error("Config not found: %s", config_path)
         return 1
 
@@ -1907,12 +1924,24 @@ def run_export_weights_command(args: argparse.Namespace) -> int:
     config_dest = outdir / "config.json"
     metrics_dest = outdir / "metrics.json"
     shutil.copy2(checkpoint_path, weights_dest)
-    shutil.copy2(config_path, config_dest)
+    if use_embedded_config:
+        config_dest.write_text(json.dumps(embedded_config, indent=2) + "\n")
+        exported_config_source = "metrics.config"
+    else:
+        shutil.copy2(config_path, config_dest)
+        exported_config_source = str(config_path)
     shutil.copy2(metrics_path, metrics_dest)
+    test_metrics_path = metrics_path.parent / "test_metrics.json"
+    test_metrics_dest = outdir / "test_metrics.json"
+    test_metrics_data: dict[str, Any] | None = None
+    if test_metrics_path.exists():
+        shutil.copy2(test_metrics_path, test_metrics_dest)
+        test_metrics_data = cast(dict[str, Any], json.loads(test_metrics_path.read_text()))
 
     hf_repo_id = args.hf_repo_id or "YOUR_HF_USERNAME/ndswin-model"
     metric_name = metrics_data.get("best_metric_name") or "validation metric"
     metric_value = metrics_data.get("best_metric_value")
+    test_metrics = test_metrics_data.get("metrics", {}) if test_metrics_data else {}
     readme = [
         "---",
         "library_name: flax",
@@ -1928,22 +1957,44 @@ def run_export_weights_command(args: argparse.Namespace) -> int:
         "",
         "This bundle was exported locally by `ndswin export-weights`.",
         "",
-        f"- Intended Hub repo: `{hf_repo_id}`",
+        f"- Hub repo: `{hf_repo_id}`",
+        "- Project repository: https://github.com/volodymyr-yelisieiev/ndswin-jax",
         f"- Source metrics: `{metrics_path}`",
         f"- Source checkpoint: `{checkpoint_path}`",
         f"- Selection metric: `{metric_name}`",
         f"- Selection value: `{metric_value}`",
-        "",
-        "Files:",
-        "",
-        "- `weights.npz`: restored-best checkpoint weights",
-        "- `config.json`: experiment configuration",
-        "- `metrics.json`: training metrics and artifact metadata",
-        "- `export_manifest.json`: local export manifest",
-        "",
-        "This command does not push to the Hugging Face Hub. Review the files and upload them with `huggingface-cli upload` or `huggingface_hub` when ready.",
-        "",
     ]
+    if test_metrics:
+        readme.extend(
+            [
+                f"- Held-out test accuracy: `{test_metrics.get('accuracy')}`",
+                f"- Held-out test top-5 accuracy: `{test_metrics.get('top5_accuracy')}`",
+                f"- Held-out test loss: `{test_metrics.get('loss')}`",
+            ]
+        )
+    readme.extend(
+        [
+            "",
+            "Files:",
+            "",
+            "- `weights.npz`: restored-best checkpoint weights",
+            "- `config.json`: experiment configuration",
+            "- `metrics.json`: training metrics and artifact metadata",
+        ]
+    )
+    if test_metrics_data is not None:
+        readme.append(
+            "- `test_metrics.json`: held-out test split metrics recomputed from `weights.npz`"
+        )
+    readme.extend(
+        [
+            "- `export_manifest.json`: local export manifest",
+            "",
+            "The checkpoint was selected by validation accuracy. If `test_metrics.json` is present, "
+            "those metrics were recomputed on the held-out test split after training.",
+            "",
+        ]
+    )
     (outdir / "README.md").write_text("\n".join(readme))
 
     manifest = {
@@ -1951,9 +2002,12 @@ def run_export_weights_command(args: argparse.Namespace) -> int:
         "weights": str(weights_dest),
         "config": str(config_dest),
         "metrics": str(metrics_dest),
+        "test_metrics": str(test_metrics_dest) if test_metrics_data is not None else None,
         "model_card": str(outdir / "README.md"),
         "source_checkpoint": str(checkpoint_path),
         "source_metrics": str(metrics_path),
+        "source_config": exported_config_source,
+        "source_test_metrics": str(test_metrics_path) if test_metrics_data is not None else None,
         "hf_repo_id": hf_repo_id,
         "pushed_to_hub": False,
     }

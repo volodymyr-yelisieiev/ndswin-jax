@@ -1,6 +1,7 @@
 """Tests for data loading utilities."""
 
 import logging
+import subprocess
 import sys
 import types
 import unittest.mock as mock
@@ -68,6 +69,42 @@ def test_synthetic_data_loader_3d():
     assert batch["label"].shape == (2,)
 
 
+def test_shuffled_loader_reset_advances_epoch_rng():
+    """Train-style resets should not repeat the same shuffled first batch."""
+    loader = SyntheticDataLoader(
+        num_samples=16,
+        input_shape=(1, 4, 4),
+        num_classes=4,
+        batch_size=4,
+        shuffle=True,
+        seed=123,
+    )
+
+    first_batch = next(iter(loader))
+    loader.reset()
+    second_batch = next(iter(loader))
+
+    assert not np.array_equal(np.asarray(first_batch["image"]), np.asarray(second_batch["image"]))
+
+
+def test_eval_loader_reset_rewinds_rng():
+    """Eval-style resets should stay deterministic when shuffling is disabled."""
+    loader = SyntheticDataLoader(
+        num_samples=16,
+        input_shape=(1, 4, 4),
+        num_classes=4,
+        batch_size=4,
+        shuffle=False,
+        seed=123,
+    )
+
+    first_batch = next(iter(loader))
+    loader.reset()
+    second_batch = next(iter(loader))
+
+    assert np.array_equal(np.asarray(first_batch["image"]), np.asarray(second_batch["image"]))
+
+
 @mock.patch("ndswin.training.data.SyntheticDataLoader")
 def test_create_data_loader_synthetic(mock_loader):
     """Test create_data_loader delegates to Synthetic correctly."""
@@ -107,19 +144,39 @@ def test_create_data_loader_huggingface(monkeypatch):
     assert loader_train.dataset_info.name == "cifar10"
 
 
+def test_webdataset_export_failure_refuses_synthetic_fallback(monkeypatch):
+    """Failed HF export must be explicit rather than silently training on synthetic data."""
+    import ndswin.training.data as data_module
+
+    config = DataConfig(dataset="hf:example/webdataset", image_size=(32, 32), in_channels=3)
+
+    def fail_hf_loader(*args, **kwargs):
+        raise ValueError("WebDataset TAR archives are not supported by datasets loader")
+
+    def fail_export(*args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd=args[0])
+
+    monkeypatch.setattr(data_module, "HuggingFaceDataLoader", fail_hf_loader)
+    monkeypatch.setattr(data_module.subprocess, "check_call", fail_export)
+
+    with pytest.raises(RuntimeError, match="refusing to train on synthetic fallback data"):
+        create_data_loader(config, batch_size=4)
+
+
 def test_cifar_validation_loader_uses_train_source_split(monkeypatch):
     """CIFAR validation should come from the train split, not a nonexistent validation split."""
 
     calls = []
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
 
     def fake_load_dataset(hf_id, split, data_dir=None):
         calls.append({"hf_id": hf_id, "split": split, "data_dir": data_dir})
         return [
             {
-                "img": np.zeros((4, 4, 3), dtype=np.uint8),
+                "img": image,
                 "label": idx % 10,
             }
-            for idx in range(5001)
+            for idx in range(50000)
         ]
 
     fake_datasets = types.SimpleNamespace(load_dataset=fake_load_dataset)
@@ -135,6 +192,38 @@ def test_cifar_validation_loader_uses_train_source_split(monkeypatch):
 
     assert calls[-1]["split"] == "train"
     assert loader.num_samples == 5000
+    counts = np.bincount(loader.y, minlength=10)
+    assert counts.tolist() == [500] * 10
+
+
+def test_cifar_train_loader_uses_stratified_complement(monkeypatch):
+    """CIFAR train split should be the stratified complement of validation."""
+
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+
+    def fake_load_dataset(hf_id, split, data_dir=None):
+        return [
+            {
+                "img": image,
+                "label": idx % 10,
+            }
+            for idx in range(50000)
+        ]
+
+    fake_datasets = types.SimpleNamespace(load_dataset=fake_load_dataset)
+    monkeypatch.setitem(sys.modules, "datasets", fake_datasets)
+
+    loader = CIFAR10DataLoader(
+        data_dir="data",
+        split="train",
+        batch_size=2,
+        shuffle=False,
+        download=False,
+    )
+
+    assert loader.num_samples == 45000
+    counts = np.bincount(loader.y, minlength=10)
+    assert counts.tolist() == [4500] * 10
 
 
 def test_huggingface_loader_segmentation(monkeypatch):

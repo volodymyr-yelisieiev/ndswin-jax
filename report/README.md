@@ -4,14 +4,12 @@ This directory contains the submission-ready LaTeX report for the NDSwin-JAX pra
 
 ## Supported toolchain
 
-Use a modern TeX distribution equivalent to TeX Live 2023 or newer with the following tools and packages available:
+Use a modern TeX distribution with the following tools and packages available:
 
 - `xelatex`
-- `biber`
-- `hyperxmp`
-- `euler-math`
+- `bibtex`
 
-The report intentionally follows the official JKU technical report path with `techreport,fancyfonts` and `biblatex` + `biber`. Environment-specific fallbacks from the earlier draft were removed on purpose.
+The report intentionally follows the official JKU technical report path with `techreport` and `biblatex` using the BibTeX backend configured in `main-report.tex`. Environment-specific fallbacks from the earlier draft were removed on purpose.
 
 ## Build
 
@@ -21,11 +19,24 @@ The canonical build entrypoint is:
 make -C report pdf
 ```
 
-This runs:
+To refresh the committed raw artifacts and regenerate the plot CSVs from the pinned publishable artifact set:
+
+```bash
+make -C report refresh-data
+```
+
+To intentionally resolve the newest matching local artifacts instead of the
+pinned publishable artifact set, run:
+
+```bash
+python extract_report_data.py --sync --sync-latest
+```
+
+The PDF build runs:
 
 ```bash
 xelatex -interaction=nonstopmode main-report.tex
-biber main-report
+bibtex main-report
 xelatex -interaction=nonstopmode main-report.tex
 xelatex -interaction=nonstopmode main-report.tex
 ```

@@ -13,32 +13,65 @@ DEFAULT_SOURCES_DIR = DEFAULT_DATA_DIR / "sources"
 
 DEFAULT_ARTIFACTS = {
     "cifar_summary": "outputs/sweeps/cifar10_tuned_hyperparam_sweep/summary.json",
+    "cifar100_summary": "outputs/sweeps/cifar100_tuned_hyperparam_sweep_fixed_20260519/summary.json",
     "modelnet_summary": "outputs/sweeps/modelnet40_stable_hyperparam_sweep/summary.json",
-    "cifar_metrics": "outputs/cifar10/cifar10_tuned_8021c956_20260429_064522/checkpoints/metrics.json",
+    "cifar_metrics": "outputs/cifar10/cifar10_rngfix_retrain600_20260518/checkpoints/metrics.json",
+    "cifar_test_metrics": (
+        "outputs/cifar10/cifar10_rngfix_retrain600_20260518/checkpoints/test_metrics.json"
+    ),
+    "cifar100_metrics": (
+        "outputs/cifar100/cifar100_tuned_0fd87157_20260520_112244/checkpoints/metrics.json"
+    ),
+    "cifar100_test_metrics": (
+        "outputs/cifar100/cifar100_tuned_0fd87157_20260520_112244/checkpoints/test_metrics.json"
+    ),
     "modelnet_metrics": "outputs/volume_folder/modelnet40_f67c9398_20260429_165927/checkpoints/metrics.json",
+    "modelnet_test_metrics": (
+        "outputs/volume_folder/modelnet40_f67c9398_20260429_165927/checkpoints/test_metrics.json"
+    ),
     "cifar_best_config": "configs/auto_best/best_cifar10_cifar10_tuned_05f7e1b8_20260427_234823_trial003.json",
+    "cifar100_best_config": (
+        "configs/auto_best/best_cifar100_cifar100_tuned_a9ef3d19_20260520_040951_trial011.json"
+    ),
     "modelnet_best_config": (
         "configs/auto_best/best_volume_folder_modelnet40_e548c891_20260429_164145_trial011.json"
     ),
     "modelnet_manifest": "data/modelnet40/dataset_manifest.json",
-    "queue_results": "logs/queue_20260427_214146.json",
-    "benchmark_log": "logs/tmux/benchmark/benchmark_20260427_214145.log",
+    "cifar100_autosweep_log": "logs/tmux/auto_sweep/autosweep_20260519_214743.log",
     "modelnet_resume_log": "logs/tmux/auto_sweep/autosweep_20260429_155416.log",
-    "cifar_final_log": "logs/cifar10/cifar10_tuned_8021c956_20260429_064522.log",
+    "cifar_final_log": "logs/cifar10/cifar10_rngfix_retrain600_20260518.log",
+    "cifar100_final_log": "logs/cifar100/cifar100_tuned_0fd87157_20260520_112244.log",
     "modelnet_final_log": "logs/volume_folder/modelnet40_f67c9398_20260429_165927.log",
 }
 
 LATEST_PATTERNS = {
     "cifar_summary": "outputs/sweeps/cifar10_tuned_hyperparam_sweep/summary.json",
+    "cifar100_summary": "outputs/sweeps/cifar100_tuned_hyperparam_sweep_fixed_20260519/summary.json",
     "modelnet_summary": "outputs/sweeps/modelnet40_stable_hyperparam_sweep/summary.json",
-    "cifar_metrics": "outputs/cifar10/*/checkpoints/metrics.json",
-    "modelnet_metrics": "outputs/volume_folder/*/checkpoints/metrics.json",
+    "cifar_metrics": "outputs/cifar10/cifar10_rngfix_retrain600_20260518/checkpoints/metrics.json",
+    "cifar_test_metrics": (
+        "outputs/cifar10/cifar10_rngfix_retrain600_20260518/checkpoints/test_metrics.json"
+    ),
+    "cifar100_metrics": (
+        "outputs/cifar100/cifar100_tuned_0fd87157_20260520_112244/checkpoints/metrics.json"
+    ),
+    "cifar100_test_metrics": (
+        "outputs/cifar100/cifar100_tuned_0fd87157_20260520_112244/checkpoints/test_metrics.json"
+    ),
+    "modelnet_metrics": (
+        "outputs/volume_folder/modelnet40_f67c9398_20260429_165927/checkpoints/metrics.json"
+    ),
+    "modelnet_test_metrics": (
+        "outputs/volume_folder/modelnet40_f67c9398_20260429_165927/checkpoints/test_metrics.json"
+    ),
     "cifar_best_config": "configs/auto_best/best_cifar10_*.json",
+    "cifar100_best_config": "configs/auto_best/best_cifar100_cifar100_tuned_a9ef3d19_*.json",
     "modelnet_best_config": "configs/auto_best/best_volume_folder_modelnet40_*.json",
     "modelnet_manifest": "data/modelnet40/dataset_manifest.json",
-    "benchmark_log": "logs/tmux/benchmark/benchmark_*.log",
-    "modelnet_resume_log": "logs/tmux/auto_sweep/autosweep_*.log",
-    "cifar_final_log": "logs/cifar10/cifar10_tuned_*.log",
+    "cifar100_autosweep_log": "logs/tmux/auto_sweep/autosweep_20260519_214743.log",
+    "modelnet_resume_log": "logs/tmux/auto_sweep/autosweep_20260429_155416.log",
+    "cifar_final_log": "logs/cifar10/cifar10_rngfix_retrain600_20260518.log",
+    "cifar100_final_log": "logs/cifar100/cifar100_tuned_0fd87157_20260520_112244.log",
     "modelnet_final_log": "logs/volume_folder/modelnet40_*.log",
 }
 
@@ -61,8 +94,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sources-root", type=Path, default=DEFAULT_SOURCES_DIR)
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--cifar-summary", default=None)
+    parser.add_argument("--cifar100-summary", default=None)
     parser.add_argument("--modelnet-summary", default=None)
     parser.add_argument("--cifar-metrics", default=None)
+    parser.add_argument("--cifar100-metrics", default=None)
     parser.add_argument("--modelnet-metrics", default=None)
     return parser.parse_args()
 
@@ -90,8 +125,10 @@ def build_artifact_map(args: argparse.Namespace) -> dict[str, str]:
     artifacts = dict(DEFAULT_ARTIFACTS)
     for key, attr in (
         ("cifar_summary", "cifar_summary"),
+        ("cifar100_summary", "cifar100_summary"),
         ("modelnet_summary", "modelnet_summary"),
         ("cifar_metrics", "cifar_metrics"),
+        ("cifar100_metrics", "cifar100_metrics"),
         ("modelnet_metrics", "modelnet_metrics"),
     ):
         explicit = getattr(args, attr)
@@ -254,6 +291,12 @@ def main() -> None:
     build_sweep_csv(
         sources_root=args.sources_root,
         data_dir=args.data_dir,
+        summary_rel=artifacts["cifar100_summary"],
+        output_name="cifar100_sweep.csv",
+    )
+    build_sweep_csv(
+        sources_root=args.sources_root,
+        data_dir=args.data_dir,
         summary_rel=artifacts["modelnet_summary"],
         output_name="modelnet40_sweep_success.csv",
         invalid_output_name="modelnet40_sweep_invalid.csv",
@@ -263,6 +306,12 @@ def main() -> None:
         data_dir=args.data_dir,
         metrics_rel=artifacts["cifar_metrics"],
         output_name="cifar10_training.csv",
+    )
+    build_training_curve(
+        sources_root=args.sources_root,
+        data_dir=args.data_dir,
+        metrics_rel=artifacts["cifar100_metrics"],
+        output_name="cifar100_training.csv",
     )
     build_training_curve(
         sources_root=args.sources_root,

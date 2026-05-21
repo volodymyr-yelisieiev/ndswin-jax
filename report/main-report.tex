@@ -1,12 +1,12 @@
 % !TeX program = xelatex
 % !TeX encoding = UTF-8
 % !TeX spellcheck = en_US
-% !BIB program = biber
+% !BIB program = bibtex
 \documentclass[a4paper,oneside,10pt,english]{scrartcl}
 \usepackage[techreport,nofancyfonts]{jkureport}
 
 \usepackage{csquotes}
-\usepackage[backend=bibtex,citestyle=numeric,sortcites=true,maxcitenames=2,style=ACM-Reference-Format]{biblatex}
+\usepackage[backend=bibtex,natbib=true,style=authoryear,sortcites=true,maxcitenames=2,maxbibnames=99]{biblatex}
 \usepackage{array}
 \usepackage{booktabs}
 \usepackage{graphicx}
@@ -51,7 +51,7 @@
 \author{Volodymyr Yelisieiev\matno{12340334}}
 \supervisor[1,male]{Gianluca Galletti}
 \submissiondepartment{KUSSS IDs 365.266 / 365.267\texorpdfstring{\\}{ - }Semester: SS 2026}
-\date{2026-04-30}
+\date{2026-05-21}
 \revisionblock{%
 Public repository:\texorpdfstring{\\}{ - }%
 \url{https://github.com/volodymyr-yelisieiev/ndswin-jax}%
@@ -66,6 +66,40 @@ Public repository:\texorpdfstring{\\}{ - }%
 \cleardoubleoddpage
 \addsec{Abstract}
 \input{sections/00-abstract}
+
+\addsec{Story Summary}
+\label{sec:story-summary}
+\begin{description}
+  \item[What is the central question?]
+  Can the shifted-window Swin Transformer be implemented as a reusable N-dimensional JAX/Flax framework and trained through one shared experiment pipeline on both 2D images and 3D voxel data?
+
+  \item[Why is this question important?]
+  Many practical visual datasets are not limited to ordinary 2D images, but most Swin implementations and training utilities still contain 2D assumptions. A dimension-aware implementation makes the architecture easier to reuse for volumetric and higher-dimensional workloads.
+
+  \item[What evidence/data are needed to answer this question?]
+  The evidence consists of code paths that operate on configurable spatial dimensionality, configuration files for 2D and 3D workloads, saved sweep summaries, restored-best checkpoint metrics, held-out test recomputations, logs, and exported model weights.
+
+  \item[What methods are used to get this evidence/data?]
+  The project implements N-dimensional patch embedding, window partitioning, shifted attention, patch merging, training, sweeps, and queue execution in JAX/Flax. It evaluates the resulting system on CIFAR-10, CIFAR-100, and a voxelized ModelNet40 export.
+
+  \item[What analyses must be applied to the data to answer the central question?]
+  The report checks whether the same implementation and command surface train successfully across the selected dimensionalities, whether validation-selected checkpoints generalize to held-out test splits, and whether the reported numbers can be traced back to committed artifacts.
+
+  \item[What evidence/data values were obtained?]
+  The final restored checkpoints reach validation top-1 accuracies of 0.9182 on CIFAR-10, 0.6948 on CIFAR-100, and 0.7421 on ModelNet40. Held-out test recomputations give top-1 accuracies of 0.8995, 0.6963, and 0.6965, respectively.
+
+  \item[What were the results of the analyses?]
+  The artifact set shows that the implementation trains successfully in both 2D and 3D modes and that the final checkpoints have non-trivial held-out performance. It also shows that the ModelNet40 long retraining run did not improve over its short-budget sweep result.
+
+  \item[How did the analyses answer the central question?]
+  They support the implementation claim: the shifted-window transformer was made dimension-aware in code and can be trained through one reproducible pipeline on multiple spatial dimensionalities. The analyses do not support a state-of-the-art benchmark claim.
+
+  \item[What does this answer tell us about the broader field?]
+  It suggests that architectural ideas such as shifted-window attention can be transferred beyond their original 2D setting when the surrounding software stack is designed around spatial tuples rather than image-specific assumptions.
+
+  \item[Did the paper answer the question satisfactorily?]
+  This seminar-specific question is not directly applicable because this is a practical-work implementation report rather than a review of a single paper. For the practical-work question, the answer is satisfactory for demonstrating a credible implementation, but limited by the absence of repeated-seed uncertainty estimates and standardized large-scale benchmark comparisons.
+\end{description}
 
 \cleardoubleoddpage
 \section{Introduction}
@@ -97,28 +131,33 @@ Public repository:\texorpdfstring{\\}{ - }%
 \appendix
 \section{Committed Artifact Copies}
 \label{app:artifacts}
-The public code for this project is available at \url{https://github.com/volodymyr-yelisieiev/ndswin-jax}. The quantitative evidence in this report is tied to committed experiment-artifact copies under \path{report/data/sources/}. The derived plot tables in \path{report/data/*.csv} are regenerated from those local copies, or from a newer benchmark artifact set, by \path{report/extract_report_data.py}. The restored-best checkpoints were also packaged as Hugging Face model repositories so the final weights can be inspected independently of the local training machine.
+The public code for this project is available at \url{https://github.com/volodymyr-yelisieiev/ndswin-jax}. The quantitative evidence in this report is tied to committed experiment-artifact copies under \path{report/data/sources/}. The derived plot tables in \path{report/data/*.csv} are regenerated from those local copies by \path{report/extract_report_data.py}. The restored-best checkpoints were also packaged as Hugging Face model repositories so the final weights can be inspected independently of the local training machine.
 
-The figures and tables in this report are derived from the following committed artifact copies, relative to \path{report/data/sources/}:
+The figures and tables in this report are derived from the following committed artifact copies, relative to \path{report/data/sources/}. The table also lists the external Hugging Face repositories that host the exported final weights.
 
 \small
 \begin{tabularx}{\linewidth}{@{}lY@{}}
   \textbf{Sweep summaries} & \path{outputs/sweeps/cifar10_tuned_hyperparam_sweep/summary.json} \\
+   & \path{outputs/sweeps/cifar100_tuned_hyperparam_sweep_fixed_20260519/summary.json} \\
    & \path{outputs/sweeps/modelnet40_stable_hyperparam_sweep/summary.json} \\
-  \textbf{Final metrics} & \path{outputs/cifar10/cifar10_tuned_8021c956_20260429_064522/checkpoints/metrics.json} \\
+  \textbf{Final metrics} & \path{outputs/cifar10/cifar10_rngfix_retrain600_20260518/checkpoints/metrics.json} \\
+   & \path{outputs/cifar100/cifar100_tuned_0fd87157_20260520_112244/checkpoints/metrics.json} \\
    & \path{outputs/volume_folder/modelnet40_f67c9398_20260429_165927/checkpoints/metrics.json} \\
-  \textbf{Logs} & \path{logs/queue_20260427_214146.json} \\
-   & \path{logs/tmux/benchmark/benchmark_20260427_214145.log} \\
+  \textbf{Test metrics} & \path{outputs/cifar10/cifar10_rngfix_retrain600_20260518/checkpoints/test_metrics.json} \\
+   & \path{outputs/cifar100/cifar100_tuned_0fd87157_20260520_112244/checkpoints/test_metrics.json} \\
+   & \path{outputs/volume_folder/modelnet40_f67c9398_20260429_165927/checkpoints/test_metrics.json} \\
+  \textbf{Logs} & \path{logs/tmux/auto_sweep/autosweep_20260519_214743.log} \\
    & \path{logs/tmux/auto_sweep/autosweep_20260429_155416.log} \\
-   & \path{logs/cifar10/cifar10_tuned_8021c956_20260429_064522.log} \\
+   & \path{logs/cifar10/cifar10_rngfix_retrain600_20260518.log} \\
+   & \path{logs/cifar100/cifar100_tuned_0fd87157_20260520_112244.log} \\
    & \path{logs/volume_folder/modelnet40_f67c9398_20260429_165927.log} \\
   \textbf{Dataset manifest} & \path{data/modelnet40/dataset_manifest.json} \\
   \textbf{Best configs} & \path{configs/auto_best/best_cifar10_cifar10_tuned_05f7e1b8_20260427_234823_trial003.json} \\
+   & \path{configs/auto_best/best_cifar100_cifar100_tuned_a9ef3d19_20260520_040951_trial011.json} \\
    & \path{configs/auto_best/best_volume_folder_modelnet40_e548c891_20260429_164145_trial011.json} \\
   \textbf{Published weights} & \url{https://huggingface.co/volodymyr-yelisieiev/ndswin-cifar10-final} \\
+   & \url{https://huggingface.co/volodymyr-yelisieiev/ndswin-cifar100-final} \\
    & \url{https://huggingface.co/volodymyr-yelisieiev/ndswin-modelnet40-final} \\
-  \textbf{Local weight exports} & \path{outputs/hf_exports/cifar10_final/} \\
-   & \path{outputs/hf_exports/modelnet40_final/} \\
 \end{tabularx}
 \normalsize
 

@@ -1,0 +1,9 @@
+{
+  "checkpoint": "outputs/cifar100/cifar100_tuned_0fd87157_20260520_112244/checkpoints/best.npz",
+  "split": "test",
+  "metrics": {
+    "accuracy": 0.6963000297546387,
+    "loss": 1.3310993909835815,
+    "top5_accuracy": 0.8819000124931335
+  }
+}

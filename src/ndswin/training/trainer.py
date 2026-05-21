@@ -96,11 +96,6 @@ def create_train_state(
     # Split RNG
     rng, init_rng, dropout_rng = jax.random.split(rng, 3)
 
-    # Create model
-    if hasattr(model, "config") and hasattr(config, "stochastic_depth_rate"):
-        # Sync drop path rate if provided in training config
-        model.config.drop_path_rate = config.stochastic_depth_rate
-
     # Initialize model
     dummy_input = jnp.ones((1,) + input_shape)
     variables = model.init(init_rng, dummy_input, deterministic=False)
@@ -122,6 +117,11 @@ def create_train_state(
     return cast(TrainState, state)
 
 
+def effective_label_smoothing(labels: Array, label_smoothing: float) -> float:
+    """Apply label smoothing only to hard-label classification targets."""
+    return 0.0 if labels.ndim > 1 else label_smoothing
+
+
 @partial(jax.jit, static_argnums=(3, 4, 5, 6, 7))
 def train_step(
     state: TrainState,
@@ -139,6 +139,7 @@ def train_step(
     """
     images = batch["image"]
     labels = batch["label"]
+    sample_weight = batch.get("sample_weight")
 
     # Split RNG for this step
     dropout_rng, new_dropout_rng = jax.random.split(rng)
@@ -203,9 +204,17 @@ def train_step(
             return loss, (seg_metrics, logits, new_batch_stats)
 
         # Classification path
-        loss = cast(Array, cross_entropy_loss(logits, labels, label_smoothing))
-        acc = cast(Array, accuracy(logits, labels))
-        top5_acc = cast(Array, top_k_accuracy(logits, labels, k=5))
+        loss = cast(
+            Array,
+            cross_entropy_loss(
+                logits,
+                labels,
+                effective_label_smoothing(labels, label_smoothing),
+                sample_weight=sample_weight,
+            ),
+        )
+        acc = cast(Array, accuracy(logits, labels, sample_weight=sample_weight))
+        top5_acc = cast(Array, top_k_accuracy(logits, labels, k=5, sample_weight=sample_weight))
         cls_metrics: dict[str, MetricValue] = {
             "loss": loss,
             "accuracy": acc,
@@ -249,6 +258,7 @@ def eval_step(
     """
     images = batch["image"]
     labels = batch["label"]
+    sample_weight = batch.get("sample_weight")
 
     # Forward pass (no dropout)
     if use_batch_stats:
@@ -294,9 +304,9 @@ def eval_step(
         seg_metrics["loss"] = loss
         return seg_metrics
 
-    loss = cast(Array, cross_entropy_loss(logits, labels))
-    acc = cast(Array, accuracy(logits, labels))
-    top5_acc = cast(Array, top_k_accuracy(logits, labels, k=5))
+    loss = cast(Array, cross_entropy_loss(logits, labels, sample_weight=sample_weight))
+    acc = cast(Array, accuracy(logits, labels, sample_weight=sample_weight))
+    top5_acc = cast(Array, top_k_accuracy(logits, labels, k=5, sample_weight=sample_weight))
 
     return {
         "loss": loss,
@@ -545,6 +555,7 @@ class Trainer:
         Returns the (possibly padded) batch and the real (unpadded) batch size.
         """
         real_bs = batch["image"].shape[0]
+        sample_weight = jnp.ones((real_bs,), dtype=jnp.float32)
         if real_bs % self.num_devices != 0:
             pad_to = ((real_bs // self.num_devices) + 1) * self.num_devices
             pad_n = pad_to - real_bs
@@ -555,6 +566,12 @@ class Trainer:
                 "image": jnp.concatenate([batch["image"], img_pad], axis=0),
                 "label": jnp.concatenate([batch["label"], lbl_pad], axis=0),
             }
+            sample_weight = jnp.concatenate(
+                [sample_weight, jnp.zeros((pad_n,), dtype=jnp.float32)], axis=0
+            )
+        else:
+            batch = dict(batch)
+        batch["sample_weight"] = sample_weight
         return batch, real_bs
 
     def _copy_state(self, state: TrainState) -> TrainState:

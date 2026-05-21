@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+from flax.core import freeze, unfreeze
 
 from ndswin.core.attention import ShiftedWindowAttention, WindowAttention
 
@@ -122,6 +123,56 @@ class TestShiftedWindowAttention:
         output = attention.apply(variables, x, deterministic=True)
 
         assert output.shape == x.shape
+
+    def test_window_clamps_to_small_feature_map(self, rng):
+        """Late CIFAR stages should not pad a 2x2 feature map into a 4x4 window."""
+        attention = ShiftedWindowAttention(
+            num_heads=2,
+            window_size=(4, 4),
+            shift_size=(2, 2),
+        )
+
+        x = jnp.ones((1, 2, 2, 16))
+        variables = attention.init(rng, x, deterministic=True)
+        output = attention.apply(variables, x, deterministic=True)
+
+        bias_table = variables["params"]["attn"]["relative_position_bias_table"]
+        assert bias_table.shape == (9, 2)
+        assert output.shape == x.shape
+        assert jnp.all(jnp.isfinite(output))
+
+    def test_small_feature_map_accepts_legacy_bias_table(self, rng):
+        """Older checkpoints stored configured-window bias tables for late CIFAR stages."""
+        attention = ShiftedWindowAttention(
+            num_heads=2,
+            window_size=(4, 4),
+            shift_size=(2, 2),
+        )
+
+        x = jnp.ones((1, 2, 2, 16))
+        variables = attention.init(rng, x, deterministic=True)
+        mutable = unfreeze(variables)
+        mutable["params"]["attn"]["relative_position_bias_table"] = jnp.ones((49, 2))
+
+        output = attention.apply(freeze(mutable), x, deterministic=True)
+
+        assert output.shape == x.shape
+        assert jnp.all(jnp.isfinite(output))
+
+    def test_padding_mask_handles_non_divisible_windows(self, rng):
+        """Padding introduced for odd spatial shapes should not produce NaNs."""
+        attention = ShiftedWindowAttention(
+            num_heads=2,
+            window_size=(4, 4),
+            shift_size=(0, 0),
+        )
+
+        x = jnp.ones((1, 5, 5, 16))
+        variables = attention.init(rng, x, deterministic=True)
+        output = attention.apply(variables, x, deterministic=True)
+
+        assert output.shape == x.shape
+        assert jnp.all(jnp.isfinite(output))
 
     def test_equivariance(self, rng):
         """Test that output changes with input changes."""
