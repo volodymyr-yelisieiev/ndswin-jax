@@ -3,8 +3,9 @@
 **N-Dimensional Swin Transformer implementation in JAX/Flax**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/release/python-3110/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![JAX](https://img.shields.io/badge/JAX-0.7.1-purple.svg)](https://github.com/google/jax)
+![Flax](https://img.shields.io/badge/Flax-0.10%2B-8A2BE2)
+![Conda](https://img.shields.io/badge/environment-conda-44A833)
 
 A pure JAX/Flax implementation of the Swin Transformer, generalized to support **N-dimensional data** (2D images, 3D volumes, 4D spatio-temporal) within a single, unified codebase.
 
