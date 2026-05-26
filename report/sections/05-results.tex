@@ -34,14 +34,7 @@ The comparison between sweep-best and final restored-checkpoint performance is s
   \scriptsize
   \caption{Summary of the preserved final results. Sweep metrics correspond to the best completed sweep trial. Validation metrics correspond to the restored checkpoint selected during full retraining. Test metrics were recomputed after training from the same restored checkpoint.}
   \label{tab:summary-results}
-  \begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}l
-      S[table-format=1.4]
-      S[table-format=1.4]
-      S[table-format=1.4]
-      S[table-format=1.4]
-      S[table-format=8.0]
-      S[table-format=5.2]
-      S[table-format=3.0]@{}}
+  \begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lrrrrrrr@{}}
     \toprule
     \textbf{Dataset} &
     {\textbf{Sweep Val}} &
@@ -52,9 +45,9 @@ The comparison between sweep-best and final restored-checkpoint performance is s
     {\textbf{Time (s)}} &
     {\textbf{Best Ep.}} \\
     \midrule
-    CIFAR-10 & 0.7344 & 0.9182 & 0.8995 & 0.9936 & 48809188 & 14866.06 & 352 \\
-    CIFAR-100 & 0.5902 & 0.6948 & 0.6963 & 0.8819 & 48876478 & 12043.98 & 300 \\
-    ModelNet40 & 0.8061 & 0.7421 & 0.6965 & 0.9149 & 16423126 & 990.99 & 7 \\
+    CIFAR-10 & \(0.7344\) & \(0.9182\) & \(0.8995\) & \(0.9936\) & \(48{,}809{,}188\) & \(14{,}866.06\) & \(352\) \\
+    CIFAR-100 & \(0.5902\) & \(0.6948\) & \(0.6963\) & \(0.8819\) & \(48{,}876{,}478\) & \(12{,}043.98\) & \(300\) \\
+    ModelNet40 & \(0.8061\) & \(0.7421\) & \(0.6965\) & \(0.9149\) & \(16{,}423{,}126\) & \(990.99\) & \(7\) \\
     \bottomrule
   \end{tabular*}
 \end{table}

@@ -175,7 +175,7 @@ optimize:
 	@echo ""
 	@echo "Step 2/4: Running hyperparameter sweep..."
 	$(HF_ENV) HF_HUB_OFFLINE=1 $(NDSWIN) auto-sweep \
-		--sweep $(SWEEP) $(TRIALS_ARG) --train-epochs $(TRAIN_EPOCHS) $(EXTRA_ARGS)
+		--sweep $(SWEEP) --base-config $(CONFIG) $(TRIALS_ARG) --train-epochs $(TRAIN_EPOCHS) $(EXTRA_ARGS)
 	@echo ""
 	@echo "Step 3/4: Showing best result..."
 	@$(MAKE) show-best --no-print-directory 2>/dev/null || true
@@ -364,7 +364,17 @@ type-check:
 	$(MYPY) src/ndswin --ignore-missing-imports
 
 docs:
-	$(SPHINX) -b html docs docs/_build/html
+	@if [ -x "$(SPHINX)" ]; then \
+		"$(SPHINX)" -b html docs docs/_build/html; \
+	elif command -v sphinx-build >/dev/null 2>&1; then \
+		sphinx-build -b html docs docs/_build/html; \
+	elif $(PYTHON) -c 'import sphinx' >/dev/null 2>&1; then \
+		$(PYTHON) -m sphinx -b html docs docs/_build/html; \
+	else \
+		mkdir -p docs/_build/html; \
+		printf '%s\n' '<!doctype html><meta charset="utf-8"><title>NDSwin-JAX</title><h1>NDSwin-JAX</h1><p>Sphinx is not installed in this environment. Install the docs extra to build the full documentation.</p><p>See the repository README and report/ for the publishable project documentation.</p>' > docs/_build/html/index.html; \
+		echo "Sphinx is not installed; wrote docs/_build/html/index.html fallback."; \
+	fi
 
 # =============================================================================
 # Backup & Cleanup

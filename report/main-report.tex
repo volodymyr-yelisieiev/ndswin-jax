@@ -12,7 +12,6 @@
 \usepackage{graphicx}
 \usepackage{pgfplots}
 \usepackage{pgfplotstable}
-\usepackage{siunitx}
 \usepackage{tabularx}
 \usepackage{tikz}
 \usepackage{xurl}
@@ -33,14 +32,6 @@
 \setcounter{biburlucpenalty}{100}
 \addbibresource{references.bib}
 
-\sisetup{
-  detect-all,
-  group-separator = {,},
-  group-minimum-digits = 4,
-  round-mode = places,
-  round-precision = 2
-}
-
 \title{NDSwin-JAX:\texorpdfstring{\\}{ }Implementing and Evaluating an N-Dimensional\texorpdfstring{\\}{ }Shifted Window Transformer in JAX}
 \titleshort{NDSwin-JAX}
 \subtitle{Technical Report\texorpdfstring{\\}{ - }%
@@ -51,7 +42,7 @@
 \author{Volodymyr Yelisieiev\matno{12340334}}
 \supervisor[1,male]{Gianluca Galletti}
 \submissiondepartment{KUSSS IDs 365.266 / 365.267\texorpdfstring{\\}{ - }Semester: SS 2026}
-\date{2026-05-21}
+\date{2026-05-25}
 \revisionblock{%
 Public repository:\texorpdfstring{\\}{ - }%
 \url{https://github.com/volodymyr-yelisieiev/ndswin-jax}%
@@ -133,7 +124,7 @@ Public repository:\texorpdfstring{\\}{ - }%
 \label{app:artifacts}
 The public code for this project is available at \url{https://github.com/volodymyr-yelisieiev/ndswin-jax}. The quantitative evidence in this report is tied to committed experiment-artifact copies under \path{report/data/sources/}. The derived plot tables in \path{report/data/*.csv} are regenerated from those local copies by \path{report/extract_report_data.py}. The restored-best checkpoints were also packaged as Hugging Face model repositories so the final weights can be inspected independently of the local training machine.
 
-The figures and tables in this report are derived from the following committed artifact copies, relative to \path{report/data/sources/}. The table also lists the external Hugging Face repositories that host the exported final weights.
+The figures and tables in this report are derived from the following committed artifact copies, relative to \path{report/data/sources/}. Final metric files contain the effective training configurations used for the reported checkpoints. The sweep-selected config files are included as traceability artifacts, but some full retraining runs intentionally changed runtime fields such as epoch budget after sweep selection. The table also lists the external Hugging Face repositories that host the exported final weights.
 
 \small
 \begin{tabularx}{\linewidth}{@{}lY@{}}
@@ -152,7 +143,7 @@ The figures and tables in this report are derived from the following committed a
    & \path{logs/cifar100/cifar100_tuned_0fd87157_20260520_112244.log} \\
    & \path{logs/volume_folder/modelnet40_f67c9398_20260429_165927.log} \\
   \textbf{Dataset manifest} & \path{data/modelnet40/dataset_manifest.json} \\
-  \textbf{Best configs} & \path{configs/auto_best/best_cifar10_cifar10_tuned_05f7e1b8_20260427_234823_trial003.json} \\
+  \textbf{Sweep-selected configs} & \path{configs/auto_best/best_cifar10_cifar10_tuned_05f7e1b8_20260427_234823_trial003.json} \\
    & \path{configs/auto_best/best_cifar100_cifar100_tuned_a9ef3d19_20260520_040951_trial011.json} \\
    & \path{configs/auto_best/best_volume_folder_modelnet40_e548c891_20260429_164145_trial011.json} \\
   \textbf{Published weights} & \url{https://huggingface.co/volodymyr-yelisieiev/ndswin-cifar10-final} \\

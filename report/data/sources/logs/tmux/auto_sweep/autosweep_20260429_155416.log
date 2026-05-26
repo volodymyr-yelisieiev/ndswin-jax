@@ -27,8 +27,8 @@
 2026-04-29 16:59:20,395 - ndswin.cli - INFO - Copied optimal configuration to: configs/auto_best/best_volume_folder_modelnet40_e548c891_20260429_164145_trial011.json
 2026-04-29 16:59:20,395 - ndswin.cli - INFO - >>> Launching Final Full Training...
 [04/29/26 16:59:20] INFO     Bound CUDA_VISIBLE_DEVICES to available  gpu.py:104
-                             GPUs: [1, 2, 3, 0] (min_free_mb=4000,              
-                             max_used_mb=512, max_utilization=50)               
+                             GPUs: [1, 2, 3, 0] (min_free_mb=4000,
+                             max_used_mb=512, max_utilization=50)
 2026-04-29 16:59:27,340 - train - INFO - ======================================================================
 2026-04-29 16:59:27,341 - train - INFO - NDSwin-JAX Training
 2026-04-29 16:59:27,341 - train - INFO - ======================================================================

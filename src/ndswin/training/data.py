@@ -1051,8 +1051,12 @@ class VolumeFolderDataLoader(DataLoader):
             batch_x = _normalize_batch(batch_x, self.mean, self.std)
 
             if self.transform is not None:
-                # transform should accept (numpy array, rng) similar to CIFAR transforms
-                batch_x = self.transform(batch_x, self._rng.randint(0, 2**31))
+                key = jax.random.PRNGKey(int(self._rng.randint(0, 2**31 - 1)))
+                transformed = []
+                for i in range(batch_x.shape[0]):
+                    key, subkey = jax.random.split(key)
+                    transformed.append(self.transform(jnp.array(batch_x[i]), subkey))
+                batch_x = jnp.stack(transformed, axis=0)
 
             yield {
                 "image": jnp.array(batch_x),
@@ -1642,6 +1646,8 @@ def create_data_loader(
             split=normalized_split,
             batch_size=bs,
             shuffle=is_train,
+            drop_last=config.drop_last if is_train else False,
+            transform=train_transform,
             seed=config.seed,
             in_channels=config.in_channels,
             image_size=config.image_size,
@@ -1663,6 +1669,7 @@ def create_data_loader(
             split=requested_split,
             batch_size=bs,
             shuffle=is_train,
+            drop_last=config.drop_last if is_train else False,
             seed=config.seed,
             in_channels=config.in_channels,
             image_size=config.image_size,
@@ -1728,7 +1735,8 @@ def create_data_loader(
                     split=normalized_split,
                     batch_size=bs,
                     shuffle=is_train,
-                    seed=42,
+                    drop_last=config.drop_last if is_train else False,
+                    seed=config.seed,
                     in_channels=config.in_channels,
                     image_size=config.image_size,
                     mean=config.mean,

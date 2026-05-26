@@ -24,12 +24,12 @@ The project extends beyond the model definition into the training system. The re
     CPU & Intel Xeon E5-2630 v4, 20 logical CPUs \\
     GPU inventory & 4 \(\times\) NVIDIA GeForce GTX 1080 Ti, 11264 MiB each \\
     RAM & 125 GiB system memory \\
-    Runtime device selection & 4 GPUs selected automatically for both preserved final training runs \\
+    Runtime device selection & Automatic GPU selection through the CLI; preserved CIFAR-100 and ModelNet40 auto-sweep logs record all four GPUs selected \\
     Core software & JAX 0.7.1, jaxlib 0.7.1, Flax, Optax, Orbax checkpointing \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
-Training itself is implemented with JAX-based optimization and data-parallel sharding. The trainer constructs a JAX mesh over the visible devices and shards batches along the batch dimension using \texttt{NamedSharding}. This is relevant because the kept April logs show that the preserved final runs selected four GPUs automatically rather than relying on a manually fixed device list. The code chooses only devices that satisfy memory and utilization thresholds, so the report does not overstate the hardware actually used for the preserved experiments.
+Training itself is implemented with JAX-based optimization and data-parallel sharding. The trainer constructs a JAX mesh over the visible devices and shards batches along the batch dimension using \texttt{NamedSharding}. This is relevant because the preserved auto-sweep logs for CIFAR-100 and ModelNet40 show that the CLI selected four GPUs automatically rather than relying on a manually fixed device list. The code chooses only devices that satisfy memory and utilization thresholds, so the report does not overstate the hardware actually evidenced by the preserved logs.
 
 Finally, the implementation includes guard rails around data and configuration. Dataset contracts are validated before training starts, the ModelNet40 export is described by a manifest containing split counts and class information, and the sweep and queue layers record summaries to JSON. These details matter scientifically because they make the evidence auditable. The results reported later are extracted from structured artifacts that preserve configuration, runtime metadata, and metric histories rather than from informal notes or screenshots.

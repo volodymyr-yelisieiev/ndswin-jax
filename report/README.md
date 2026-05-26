@@ -41,12 +41,6 @@ xelatex -interaction=nonstopmode main-report.tex
 xelatex -interaction=nonstopmode main-report.tex
 ```
 
-To refresh the committed raw artifacts and regenerate the plot CSVs from those local copies:
-
-```bash
-make -C report refresh-data
-```
-
 ## Clean
 
 To remove LaTeX byproducts while preserving the final PDF:
@@ -58,6 +52,6 @@ make -C report clean
 ## Notes
 
 - The report uses vendored JKU template assets from `michaelroland/jku-templates-report-latex` release `v2.2`.
-- The content is grounded in repository snapshot `843295e09f86ff8e40c1bf2545862e5e3da10826`.
+- The content is grounded in the committed repository state and the pinned artifact copies under `report/data/sources/`.
 - Raw experiment artifacts used by the report are committed under `report/data/sources/`.
 - Vector figures are rendered from committed CSV data under `report/data/`, regenerated from those vendored raw artifacts.

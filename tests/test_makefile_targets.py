@@ -101,3 +101,23 @@ def test_makefile_exposes_benchmark_targets():
     assert result.returncode == 0
     assert "benchmark" in result.stdout
     assert "benchmark-tmux" in result.stdout
+
+
+def test_makefile_optimize_passes_config_as_base_config():
+    """The high-level optimize target should honor CONFIG, not only SWEEP."""
+    result = subprocess.run(
+        [
+            "make",
+            "-n",
+            "optimize",
+            "CONFIG=configs/modelnet40.json",
+            "SWEEP=configs/sweeps/modelnet40_stable_hyperparam_sweep.yaml",
+            "TRAIN_EPOCHS=1",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--base-config configs/modelnet40.json" in result.stdout

@@ -156,7 +156,14 @@ def sync_artifacts(
             dest_rel = Path(src.name)
         dest = sources_root / dest_rel
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dest)
+        if src.suffix == ".log":
+            text = src.read_text(encoding="utf-8", errors="replace")
+            normalized = "\n".join(line.rstrip() for line in text.splitlines())
+            if text.endswith(("\n", "\r")):
+                normalized += "\n"
+            dest.write_text(normalized, encoding="utf-8")
+        else:
+            shutil.copy2(src, dest)
         synced[key] = str(dest_rel)
         print(f"synced {display_path(src)} -> {display_path(dest)}")
     return synced

@@ -13,6 +13,7 @@ from ndswin.config import DataConfig
 from ndswin.training.data import (
     CIFAR10DataLoader,
     HuggingFaceDataLoader,
+    NumpySegmentationFolderDataLoader,
     SyntheticDataLoader,
     VolumeFolderDataLoader,
     create_data_loader,
@@ -161,6 +162,41 @@ def test_webdataset_export_failure_refuses_synthetic_fallback(monkeypatch):
 
     with pytest.raises(RuntimeError, match="refusing to train on synthetic fallback data"):
         create_data_loader(config, batch_size=4)
+
+
+def test_webdataset_export_success_preserves_loader_seed_and_drop_last(tmp_path, monkeypatch):
+    """Successful HF export fallback should remain driven by DataConfig settings."""
+    import ndswin.training.data as data_module
+
+    monkeypatch.chdir(tmp_path)
+    config = DataConfig(
+        dataset="hf:example/webdataset",
+        image_size=(4, 4),
+        in_channels=1,
+        seed=123,
+        drop_last=True,
+    )
+
+    def fail_hf_loader(*args, **kwargs):
+        raise ValueError("WebDataset TAR archives are not supported by datasets loader")
+
+    def successful_export(cmd):
+        outdir = tmp_path / "data" / "example_webdataset" / "train"
+        image_dir = outdir / "images"
+        label_dir = outdir / "labels"
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        np.savez_compressed(image_dir / "sample.npz", image=np.ones((1, 4, 4), dtype=np.float32))
+        np.savez_compressed(label_dir / "sample.npz", label=np.ones((4, 4), dtype=np.int32))
+
+    monkeypatch.setattr(data_module, "HuggingFaceDataLoader", fail_hf_loader)
+    monkeypatch.setattr(data_module.subprocess, "check_call", successful_export)
+
+    loader = create_data_loader(config, batch_size=4)
+
+    assert isinstance(loader, NumpySegmentationFolderDataLoader)
+    assert loader.seed == 123
+    assert loader.drop_last is True
 
 
 def test_cifar_validation_loader_uses_train_source_split(monkeypatch):
@@ -626,3 +662,40 @@ def test_create_data_loader_routes_array_folder(tmp_path):
 
     assert isinstance(loader, VolumeFolderDataLoader)
     assert batch["image"].shape == (1, 1, 8)
+
+
+def test_create_data_loader_array_folder_honors_train_runtime_options(tmp_path):
+    """Generic N-D folder loaders should receive the same train-time options as CIFAR."""
+    for class_name in ("class_a", "class_b", "class_c"):
+        class_dir = tmp_path / "train" / class_name
+        class_dir.mkdir(parents=True)
+        np.save(class_dir / "sample.npy", np.ones((8,), dtype=np.float32))
+    val_dir = tmp_path / "validation" / "class_a"
+    val_dir.mkdir(parents=True)
+    np.save(val_dir / "sample.npy", np.ones((8,), dtype=np.float32))
+
+    config = DataConfig(
+        dataset="array_folder",
+        data_dir=str(tmp_path),
+        image_size=(8,),
+        in_channels=1,
+        mean=(0.0,),
+        std=(1.0,),
+        augmentation=True,
+        random_flip=True,
+        drop_last=True,
+        seed=123,
+    )
+
+    train_loader = create_data_loader(config, split="train", batch_size=2)
+    eval_loader = create_data_loader(config, split="validation", batch_size=2)
+
+    assert isinstance(train_loader, VolumeFolderDataLoader)
+    assert train_loader.drop_last is True
+    assert train_loader.transform is not None
+    assert train_loader.seed == 123
+    assert len(train_loader) == 1
+
+    assert isinstance(eval_loader, VolumeFolderDataLoader)
+    assert eval_loader.drop_last is False
+    assert eval_loader.transform is None

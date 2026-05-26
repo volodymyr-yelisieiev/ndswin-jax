@@ -216,7 +216,7 @@ def test_report_extractor_syncs_latest_report_source_bundle(tmp_path: Path):
     ):
         path = live / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("ok")
+        path.write_text("ok   \nnext\t\n")
 
     result = subprocess.run(
         [
@@ -244,6 +244,8 @@ def test_report_extractor_syncs_latest_report_source_bundle(tmp_path: Path):
     assert (sources / "data/modelnet40/dataset_manifest.json").exists()
     assert (sources / "logs/tmux/auto_sweep/autosweep_20260429_155416.log").exists()
     assert (sources / "logs/tmux/auto_sweep/autosweep_20260519_214743.log").exists()
+    synced_log = (sources / "logs/tmux/auto_sweep/autosweep_20260519_214743.log").read_text()
+    assert synced_log == "ok\nnext\n"
     assert not (sources / "logs/queue_20260427_214146.json").exists()
     assert not (sources / "logs/tmux/benchmark/benchmark_20260427_214145.log").exists()
     assert "0.7344" in (out / "cifar10_sweep.csv").read_text()

@@ -86,7 +86,7 @@ These points reflect the repository as it exists now:
   - `sweep`
   - `auto-sweep`
 - For long unattended benchmark workflows, prefer `make benchmark-tmux` for the canonical 2D->3D practical-work queue, or the tmux-backed `make *-tmux` wrappers for individual workflows. Their wrapper logs now live under `logs/tmux/{train,sweep,auto_sweep,queue,benchmark}/`.
-- `make optimize` is the highest-level shortcut: it tries to fetch data, runs `auto-sweep`, then runs `show-best`.
+- `make optimize` is the highest-level shortcut: it tries to fetch data, runs `auto-sweep` with `CONFIG` passed as `--base-config`, then runs `show-best`.
 - `make validate` runs the CLI validation command, which by default runs **pytest first** and then a short smoke-training run.
 - Hugging Face caches are intentionally localized via environment variables such as `HF_HOME=.hf_cache` and `HF_DATASETS_CACHE=.hf_cache`.
 - Outputs are organized by dataset/stamp under `outputs/`, and logs are organized under `logs/`.
@@ -224,7 +224,7 @@ make clean-all FORCE=1
 - Sweep `summary.json` files now store top-level metadata such as `metric`, `trials`, and `budget_epochs`, with per-trial entries under `results`.
 - Sweep selection honors the sweep file's `metric` field when choosing the best trial.
 - `make auto-sweep` selects the best trial and trains it.
-- `make optimize` wraps fetching + auto-sweep + show-best.
+- `make optimize` wraps fetching + auto-sweep + show-best, and passes `CONFIG` into `auto-sweep` as the base config.
 - `configs/queues/benchmark_2d_then_3d.yaml` is the canonical sequential benchmark queue for `fetch CIFAR-10 -> fetch ModelNet40 -> 2D optimize/train -> 3D optimize/train`.
 
 ### Queues

@@ -58,6 +58,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "build>=1.0",
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-xdist>=3.0",
@@ -83,7 +84,7 @@ all = [
 
 [project.urls]
 Homepage = "https://github.com/volodymyr-yelisieiev/ndswin-jax"
-Documentation = "https://ndswin-jax.readthedocs.io"
+Documentation = "https://github.com/volodymyr-yelisieiev/ndswin-jax#readme"
 Repository = "https://github.com/volodymyr-yelisieiev/ndswin-jax.git"
 Issues = "https://github.com/volodymyr-yelisieiev/ndswin-jax/issues"
 Changelog = "https://github.com/volodymyr-yelisieiev/ndswin-jax/blob/main/CHANGELOG.md"
