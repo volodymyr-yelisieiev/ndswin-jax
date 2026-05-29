@@ -293,3 +293,47 @@ class TestDataLoaderAugmentation:
         assert loader._color_jitter_brightness == 0.4
         assert loader._color_jitter_contrast == 0.4
         assert loader._cutout_size == 8
+
+    def test_cifar_loader_applies_random_rotation_fast_path(self):
+        """CIFAR loader should not ignore configured 2D random rotation."""
+
+        class MockCIFARLoader(CIFARDataLoader):
+            def _load_data(self):
+                images = np.arange(4 * 3 * 16 * 16, dtype=np.float32).reshape(4, 3, 16, 16)
+                images = images / images.max()
+                return images, np.zeros(4, dtype=np.int64)
+
+            @property
+            def dataset_info(self):
+                from ndswin.training.data import DatasetInfo
+
+                return DatasetInfo(
+                    "mock", 10, 4, 0, 0, (3, 16, 16), (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
+                )
+
+        config = DataConfig(
+            dataset="cifar10",
+            image_size=(16, 16),
+            in_channels=3,
+            augmentation=True,
+            random_rotation=45.0,
+            normalize=False,
+        )
+        pipeline = create_augmentation_pipeline(config, is_training=True, skip_normalize=True)
+        loader = MockCIFARLoader(
+            name="mock",
+            data_dir="tmp",
+            split="train",
+            batch_size=4,
+            shuffle=False,
+            transform=pipeline,
+            normalize=False,
+            seed=7,
+        )
+
+        batch = loader.x[:4].copy()
+        augmented = loader._augment_batch(batch.copy())
+
+        assert loader._random_rotation_degrees == 45.0
+        assert augmented.shape == batch.shape
+        assert not np.allclose(augmented, batch)

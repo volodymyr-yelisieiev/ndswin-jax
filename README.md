@@ -31,6 +31,32 @@ The final restored-best checkpoints from the preserved practical-work artifact s
 
 All checkpoints were selected by validation accuracy. Test metrics were recomputed afterward from the restored checkpoint and are included in each model repository as `test_metrics.json`.
 
+## Practical Work Reproduction
+
+The Practical Work report is tied to the committed artifact bundle under
+`report/data/sources/`. Those files are curated copies of the sweep summaries,
+final metrics, test metrics, logs, selected configs, and ModelNet40 manifest used
+for the published tables and figures. Regenerating the report data from this
+bundle does not require local `outputs/` or `logs/` directories:
+
+```bash
+make env
+conda activate ./Environment/ndswin-jax
+
+make test-fast
+make lint
+make type-check
+
+make -C report data
+make -C report pdf
+make -C report submission
+```
+
+For a lightweight pipeline sanity check instead of rerunning the full benchmark
+campaign, use `make validate`. Full metric reproduction requires rerunning the
+long sweep/retrain workloads on suitable CUDA hardware; the preserved report
+artifacts provide the exact evidence used for the submitted PDF.
+
 ## Quick Start
 
 ### 1. Setup

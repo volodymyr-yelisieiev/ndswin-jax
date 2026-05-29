@@ -3,7 +3,7 @@
 This module provides optimizer creation and configuration.
 """
 
-from typing import Any, cast
+from typing import cast
 
 import optax
 
@@ -130,14 +130,3 @@ def create_optimizer(
     transforms.append(base_opt)
 
     return optax.chain(*transforms)
-
-
-def get_current_learning_rate(
-    state: Any,  # TrainState
-    step: int,
-) -> float:
-    """Get current learning rate from state."""
-    # Since we use optax schedules, we can just call the schedule if we had it,
-    # but TrainState doesn't store the schedule.
-    # Usually we can look at opt_state if it's a simple scale_by_schedule.
-    return 0.0  # Placeholder as it depends on having the schedule function handy.

@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import jax
 import jax.numpy as jnp
+from jax.scipy.ndimage import map_coordinates
 
 from ndswin.types import Array, PRNGKey
 
@@ -346,7 +347,8 @@ class Denormalize(Transform):
 class RandomRotation(Transform):
     """Random rotation for 2D data.
 
-    Rotates by a random angle within specified range.
+    Rotates channel-first 2D inputs by a random angle within the configured
+    range using bilinear interpolation.
     """
 
     def __init__(
@@ -370,17 +372,35 @@ class RandomRotation(Transform):
         Returns:
             Rotated array.
         """
-        if key is None:
+        if key is None or self.degrees <= 0:
             return x
+        if x.ndim != 3:
+            raise ValueError(f"RandomRotation expects input shape (C, H, W), got {x.shape}")
 
-        # Generate random angle (currently not used in placeholder implementation)
-        _ = jax.random.uniform(key, minval=-self.degrees, maxval=self.degrees)
+        _, height, width = x.shape
+        angle = jax.random.uniform(key, (), minval=-self.degrees, maxval=self.degrees)
+        radians = jnp.deg2rad(angle)
+        cos_theta = jnp.cos(radians)
+        sin_theta = jnp.sin(radians)
 
-        # Simple rotation using scipy.ndimage-like affine transform
-        # For JAX, we use jax.scipy.ndimage.rotate or implement manually
-        # For simplicity, return identity for now
-        # TODO: Implement proper rotation
-        return x
+        y_coords, x_coords = jnp.meshgrid(
+            jnp.arange(height, dtype=jnp.float32),
+            jnp.arange(width, dtype=jnp.float32),
+            indexing="ij",
+        )
+        center_y = (height - 1) / 2.0
+        center_x = (width - 1) / 2.0
+        x_shifted = x_coords - center_x
+        y_shifted = y_coords - center_y
+
+        sample_x = cos_theta * x_shifted + sin_theta * y_shifted + center_x
+        sample_y = -sin_theta * x_shifted + cos_theta * y_shifted + center_y
+        coordinates = (sample_y, sample_x)
+
+        def rotate_channel(channel: Array) -> Array:
+            return cast(Array, map_coordinates(channel, coordinates, order=1, mode="nearest"))
+
+        return jax.vmap(rotate_channel)(x)
 
 
 class ColorJitter(Transform):
@@ -749,6 +769,12 @@ def create_augmentation_pipeline(
         # Random horizontal flip
         if hasattr(config, "random_flip") and config.random_flip:
             transforms.append(RandomHorizontalFlip(p=0.5))
+
+        if (
+            getattr(config, "random_rotation", 0.0) > 0
+            and len(getattr(config, "image_size", ())) == 2
+        ):
+            transforms.append(RandomRotation(float(config.random_rotation)))
 
         # Color jitter is only meaningful for 2D RGB images.
         if (

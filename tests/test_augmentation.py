@@ -1,5 +1,7 @@
 """Tests for data augmentation utilities."""
 
+from types import SimpleNamespace
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -18,6 +20,7 @@ from ndswin.training.augmentation import (
     RandomHorizontalFlip,
     RandomRotation,
     RandomVerticalFlip,
+    create_augmentation_pipeline,
 )
 
 
@@ -85,10 +88,36 @@ def test_normalize_denormalize(dummy_img_2d):
 
 
 def test_random_rotation(dummy_img_2d, prng_key):
-    """Test random rotation (identity placeholder)."""
+    """Test random rotation changes non-uniform 2D images."""
     transform = RandomRotation(degrees=15.0)
+    image = jnp.arange(3 * 16 * 16, dtype=jnp.float32).reshape(3, 16, 16)
+    out = transform(image, prng_key)
+    assert out.shape == image.shape
+    assert not jnp.allclose(out, image)
+
+
+def test_random_rotation_zero_degrees_is_identity(dummy_img_2d, prng_key):
+    """Test zero-degree rotation leaves inputs unchanged."""
+    transform = RandomRotation(degrees=0.0)
     out = transform(dummy_img_2d, prng_key)
-    assert out.shape == dummy_img_2d.shape
+    assert jnp.allclose(out, dummy_img_2d)
+
+
+def test_augmentation_pipeline_includes_configured_rotation():
+    """Test configured 2D random rotation is wired into the pipeline."""
+    config = SimpleNamespace(
+        augmentation=True,
+        random_crop=False,
+        random_flip=False,
+        random_rotation=20.0,
+        color_jitter=False,
+        cutout_size=0,
+        image_size=(16, 16),
+        normalize=False,
+    )
+
+    transform = create_augmentation_pipeline(config, is_training=True)
+    assert any(isinstance(item, RandomRotation) for item in transform.transforms)
 
 
 def test_color_jitter(dummy_img_2d, prng_key):

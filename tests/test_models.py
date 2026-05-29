@@ -3,8 +3,10 @@
 import jax
 import jax.numpy as jnp
 import optax
+import pytest
 
 from ndswin.models.classifier import SwinClassifier, create_classifier
+from ndswin.models.pretrained import list_pretrained_models, load_pretrained
 from ndswin.models.swin import NDSwinTransformer
 
 
@@ -101,6 +103,19 @@ class TestSwinClassifier:
         output = classifier.apply(variables, x, deterministic=True)
 
         assert output.shape == (2, config_2d.num_classes)
+
+
+class TestPretrainedUtilities:
+    """Tests for bundled pretrained model helpers."""
+
+    def test_no_bundled_pretrained_models_in_v010(self):
+        """NDSwin-JAX v0.1.0 does not advertise unavailable weights."""
+        assert list_pretrained_models() == []
+
+    def test_load_pretrained_reports_unsupported_bundle(self):
+        """Loading bundled pretrained weights fails with a clear message."""
+        with pytest.raises(ValueError, match="No bundled pretrained weights"):
+            load_pretrained("swin_tiny_2d_imagenet", num_classes=10)
 
 
 class TestModelJIT:

@@ -562,6 +562,7 @@ class CIFARDataLoader(DataLoader):
         self._color_jitter_contrast = 0.0
         self._cutout_size = 0
         self._cutout_p = 0.0
+        self._random_rotation_degrees = 0.0
         self._configure_transform_flags()
 
         self.x, self.y = self._load_data()
@@ -604,6 +605,7 @@ class CIFARDataLoader(DataLoader):
             Cutout,
             RandomCrop,
             RandomHorizontalFlip,
+            RandomRotation,
         )
 
         for transform in transforms:
@@ -618,6 +620,8 @@ class CIFARDataLoader(DataLoader):
                 if isinstance(transform.size, int):
                     self._cutout_size = int(transform.size)
                 self._cutout_p = float(transform.p)
+            elif isinstance(transform, RandomRotation):
+                self._random_rotation_degrees = float(transform.degrees)
 
     def _load_data(self) -> tuple[np.ndarray, np.ndarray]:
         """Load CIFAR data using Hugging Face `datasets` or `tensorflow_datasets`.
@@ -759,6 +763,20 @@ class CIFARDataLoader(DataLoader):
                     bottom_idx = min(H, top_idx + cutout_size)
                     right_idx = min(W, left_idx + cutout_size)
                     batch_x[i, :, top_idx:bottom_idx, left_idx:right_idx] = 0.0
+
+        rotation_degrees = float(getattr(self, "_random_rotation_degrees", 0.0))
+        if rotation_degrees > 0.0:
+            from ndswin.training.augmentation import RandomRotation
+
+            seed = int(self._rng.randint(0, np.iinfo(np.uint32).max))
+            key = jax.random.PRNGKey(seed)
+            keys = jax.random.split(key, B)
+            rotation = RandomRotation(rotation_degrees)
+            rotated = jax.vmap(lambda image, image_key: rotation(image, image_key))(
+                jnp.asarray(batch_x),
+                keys,
+            )
+            batch_x = np.asarray(jax.device_get(rotated), dtype=batch_x.dtype)
 
         return batch_x
 

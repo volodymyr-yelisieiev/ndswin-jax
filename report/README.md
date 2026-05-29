@@ -13,13 +13,21 @@ The report intentionally follows the official JKU technical report path with `te
 
 ## Build
 
-The canonical build entrypoint is:
+Regenerate the derived CSV files from the committed artifact bundle under
+`report/data/sources/`:
+
+```bash
+make -C report data
+```
+
+The canonical PDF build entrypoint is:
 
 ```bash
 make -C report pdf
 ```
 
-To refresh the committed raw artifacts and regenerate the plot CSVs from the pinned publishable artifact set:
+To refresh the committed raw artifacts from matching local `outputs/`, `logs/`,
+`configs/auto_best/`, and `data/` paths, then regenerate the plot CSVs:
 
 ```bash
 make -C report refresh-data
@@ -31,6 +39,16 @@ pinned publishable artifact set, run:
 ```bash
 python extract_report_data.py --sync --sync-latest
 ```
+
+To create a locally ignored copy with the official Practical Work upload naming
+convention:
+
+```bash
+make -C report submission
+```
+
+This writes
+`report/dist/26SS-K12340334-Yelisieiev_Volodymyr-Practical_Work_Report_BSc-v1-NDSwin_JAX.pdf`.
 
 The PDF build runs:
 
@@ -55,3 +73,4 @@ make -C report clean
 - The content is grounded in the committed repository state and the pinned artifact copies under `report/data/sources/`.
 - Raw experiment artifacts used by the report are committed under `report/data/sources/`.
 - Vector figures are rendered from committed CSV data under `report/data/`, regenerated from those vendored raw artifacts.
+- Third-party report assets are summarized in `THIRD_PARTY.md`.

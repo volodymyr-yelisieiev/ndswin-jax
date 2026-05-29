@@ -1,7 +1,8 @@
-"""Pretrained model loading and weight management.
+"""Weight management utilities.
 
-This module provides utilities for loading pretrained weights,
-saving/loading model parameters, and model registry.
+NDSwin-JAX v0.1.0 does not ship bundled pretrained ImageNet checkpoints.
+This module keeps the public helper names stable while making that limitation
+explicit and providing supported local weight save/load helpers.
 """
 
 from pathlib import Path
@@ -15,43 +16,20 @@ from ndswin.config import NDSwinConfig
 from ndswin.models.swin import NDSwinTransformer
 from ndswin.types import Array, PyTree
 
-# Registry of pretrained models
-PRETRAINED_MODELS: dict[str, dict[str, Any]] = {
-    "swin_tiny_2d_imagenet": {
-        "config": NDSwinConfig.swin_tiny_2d,
-        "url": None,  # Placeholder for model weights URL
-        "description": "Swin-Tiny trained on ImageNet-1K",
-        "input_size": (224, 224),
-        "num_classes": 1000,
-    },
-    "swin_small_2d_imagenet": {
-        "config": NDSwinConfig.swin_small_2d,
-        "url": None,
-        "description": "Swin-Small trained on ImageNet-1K",
-        "input_size": (224, 224),
-        "num_classes": 1000,
-    },
-    "swin_base_2d_imagenet": {
-        "config": NDSwinConfig.swin_base_2d,
-        "url": None,
-        "description": "Swin-Base trained on ImageNet-1K",
-        "input_size": (224, 224),
-        "num_classes": 1000,
-    },
-}
+BUNDLED_PRETRAINED_MODELS: dict[str, dict[str, Any]] = {}
 
 
 def list_pretrained_models() -> list[str]:
-    """List available pretrained models.
+    """List bundled pretrained models.
 
     Returns:
-        List of pretrained model names.
+        List of bundled pretrained model names. Empty in v0.1.0.
     """
-    return list(PRETRAINED_MODELS.keys())
+    return list(BUNDLED_PRETRAINED_MODELS.keys())
 
 
 def get_pretrained_config(model_name: str) -> NDSwinConfig:
-    """Get configuration for a pretrained model.
+    """Get configuration for a bundled pretrained model.
 
     Args:
         model_name: Name of pretrained model.
@@ -60,25 +38,19 @@ def get_pretrained_config(model_name: str) -> NDSwinConfig:
         NDSwinConfig for the model.
 
     Raises:
-        ValueError: If model_name is not found.
+        ValueError: Always in v0.1.0 because no bundled pretrained weights ship.
     """
-    if model_name not in PRETRAINED_MODELS:
-        raise ValueError(
-            f"Unknown pretrained model: {model_name}. Available: {list_pretrained_models()}"
-        )
-
-    model_info = PRETRAINED_MODELS[model_name]
-    config_fn = model_info["config"]
-    num_classes = model_info.get("num_classes", 1000)
-
-    return cast(NDSwinConfig, config_fn(num_classes))
+    raise ValueError(
+        f"No bundled pretrained models are available in NDSwin-JAX v0.1.0 "
+        f"(requested {model_name!r}). Use load_weights() with a local export instead."
+    )
 
 
 def load_pretrained(
     model_name: str,
     num_classes: int | None = None,
 ) -> tuple[NDSwinTransformer, PyTree]:
-    """Load a pretrained model.
+    """Load a bundled pretrained model.
 
     Args:
         model_name: Name of pretrained model.
@@ -89,36 +61,14 @@ def load_pretrained(
         Tuple of (model, variables).
 
     Raises:
-        ValueError: If model_name is not found or weights are not available.
+        ValueError: Always in v0.1.0 because no bundled pretrained weights ship.
     """
-    if model_name not in PRETRAINED_MODELS:
-        raise ValueError(
-            f"Unknown pretrained model: {model_name}. Available: {list_pretrained_models()}"
-        )
-
-    model_info = PRETRAINED_MODELS[model_name]
-
-    if model_info.get("url") is None:
-        raise ValueError(
-            f"Pretrained weights not available for {model_name}. "
-            "Please train the model or provide weights manually."
-        )
-
-    # Get config
-    config = get_pretrained_config(model_name)
-
-    # Modify num_classes if needed
-    if num_classes is not None and num_classes != config.num_classes:
-        config_dict = config.to_dict()
-        config_dict["num_classes"] = num_classes
-        config = NDSwinConfig.from_dict(config_dict)
-
-    # Create model (validates config is correct)
-    _ = NDSwinTransformer(config)
-
-    # Download and load weights
-    # TODO: Implement actual weight downloading
-    raise NotImplementedError("Pretrained weight loading not yet implemented")
+    class_note = "" if num_classes is None else f" for {num_classes} classes"
+    raise ValueError(
+        f"No bundled pretrained weights are available in NDSwin-JAX v0.1.0 "
+        f"(requested {model_name!r}{class_note}). Use export-weights or load_weights() "
+        "with a local checkpoint bundle."
+    )
 
 
 def save_weights(

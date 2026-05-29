@@ -12,3 +12,4 @@
 *.toc
 *-blx.bib
 missfont.log
+dist/
