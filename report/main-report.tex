@@ -42,7 +42,7 @@
 \author{Volodymyr Yelisieiev\matno{12340334}}
 \supervisor[1,male]{Gianluca Galletti}
 \submissiondepartment{KUSSS IDs 365.266 / 365.267\texorpdfstring{\\}{ - }Semester: SS 2026}
-\date{2026-05-25}
+\date{2026-05-29}
 \revisionblock{%
 Public repository:\texorpdfstring{\\}{ - }%
 \url{https://github.com/volodymyr-yelisieiev/ndswin-jax}%
@@ -88,8 +88,6 @@ Public repository:\texorpdfstring{\\}{ - }%
   \item[What does this answer tell us about the broader field?]
   It suggests that architectural ideas such as shifted-window attention can be transferred beyond their original 2D setting when the surrounding software stack is designed around spatial tuples rather than image-specific assumptions.
 
-  \item[Did the paper answer the question satisfactorily?]
-  This seminar-specific question is not directly applicable because this is a practical-work implementation report rather than a review of a single paper. For the practical-work question, the answer is satisfactory for demonstrating a credible implementation, but limited by the absence of repeated-seed uncertainty estimates and standardized large-scale benchmark comparisons.
 \end{description}
 
 \cleardoubleoddpage
@@ -152,6 +150,6 @@ The figures and tables in this report are derived from the following committed a
 \end{tabularx}
 \normalsize
 
-Code-level implementation claims are grounded in the tracked repository files \path{pyproject.toml}, \path{src/ndswin/training/trainer.py}, and \path{src/ndswin/utils/gpu.py}.
+Code-level implementation claims are grounded in the tracked repository files \path{pyproject.toml}, \path{src/ndswin/core/window_ops.py}, \path{src/ndswin/core/patch_embed.py}, \path{src/ndswin/core/attention.py}, \path{src/ndswin/models/swin.py}, \path{src/ndswin/training/trainer.py}, and \path{src/ndswin/utils/gpu.py}.
 
 \end{document}

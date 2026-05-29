@@ -4,19 +4,44 @@ The first workload is CIFAR-10, a 10-class image classification task with \(32 \
 
 The third workload is a voxelized ModelNet40 export \citep{wu20153dshapenets}. The repository manifest describes 8{,}858 training samples, 985 train-derived validation samples, and 2{,}468 test samples, with one input channel and a spatial resolution of \(32^3\). This experiment uses \texttt{num\_dims = 3}, which activates the generalized 3D path in patch embedding, window partitioning, shifting, and patch merging. A held-out test recomputation is preserved for the final restored checkpoint, but the report remains explicit that the model was selected by validation accuracy.
 
-\paragraph{Selected retraining configurations.}
-\begin{itemize}
-  \item \textbf{CIFAR-10:} \texttt{num\_dims = 2}, patch size \(2 \times 2\), window size \(4 \times 4\), embed dimension 96, depths \([2,2,18,2]\), batch size 128, learning rate 0.0004300210, weight decay 0.0104108183, drop rate 0.05, drop path 0.1, warmup 20 epochs, cutmix 0.5, color jitter enabled.
-  \item \textbf{CIFAR-100:} \texttt{num\_dims = 2}, patch size \(2 \times 2\), window size \(4 \times 4\), embed dimension 96, depths \([2,2,18,2]\), batch size 128, learning rate 0.0002047168, weight decay 0.0267249185, drop path 0.3, warmup 30 epochs, mixup 0.2, cutmix 0.5, cutout size 16.
-  \item \textbf{ModelNet40:} \texttt{num\_dims = 3}, patch size \(2 \times 2 \times 2\), window size \(4 \times 4 \times 4\), embed dimension 72, depths \([2,2,6,2]\), batch size 64, learning rate 0.0012622739, weight decay 0.0070498347, drop path 0.1, warmup 3 epochs.
-\end{itemize}
+\begin{table}[t]
+  \centering
+  \scriptsize
+  \caption{Experimental ledger for the preserved runs. Sweep budgets and summed trial wall-clock times come from the committed sweep summaries; restored epochs and final wall-clock times come from the final \texttt{metrics.json} files.}
+  \label{tab:experiment-ledger}
+  \begin{tabularx}{\linewidth}{@{}lYYYY@{}}
+    \toprule
+    \textbf{Workload} & \textbf{Splits used} & \textbf{Sweep budget/time} & \textbf{Final training state} & \textbf{Final wall-clock} \\
+    \midrule
+    CIFAR-10 & 45k train / 5k validation / 10k test & 48 trials, 60 epochs each; 32.83 h summed & 600-epoch budget; stopped at 392; restored epoch 352 & 14{,}866.06 s (4.13 h) \\
+    CIFAR-100 & 45k train / 5k validation / 10k test & 24 trials, 50 epochs each; 13.58 h summed & 600-epoch budget; stopped at 350; restored epoch 300 & 12{,}043.98 s (3.35 h) \\
+    ModelNet40 & 8{,}858 train / 985 validation / 2{,}468 test & 15 trials, 10 epochs each; 1.08 h summed & 200-epoch budget; stopped at 27; restored epoch 7 & 990.99 s (0.28 h) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
 
-Hyperparameter search is performed through configuration-driven random search. The preserved CIFAR-10 sweep evaluated 48 trials with validation accuracy as the selection metric and a 60-epoch budget per trial. The fixed CIFAR-100 sweep evaluated 24 trials with a 50-epoch budget per trial. The ModelNet40 sweep evaluated 15 trials with a 10-epoch budget per trial after the data validation issue in the original queue attempt had been repaired. The sweep plots below show the selected trial for each workload.
+\begin{table}[t]
+  \centering
+  \scriptsize
+  \caption{Final retraining configurations. The table keeps the main effective knobs visible while the exact JSON and metric files remain preserved in \autoref{app:artifacts}.}
+  \label{tab:retrain-configs}
+  \begin{tabularx}{\linewidth}{@{}lYYY@{}}
+    \toprule
+    \textbf{Workload} & \textbf{Geometry and model} & \textbf{Optimization} & \textbf{Regularization} \\
+    \midrule
+    CIFAR-10 & 2D; patch \(2 \times 2\); window \(4 \times 4\); embed 96; depths \([2,2,18,2]\) & batch 128; lr \(4.300210 \times 10^{-4}\); wd \(1.041082 \times 10^{-2}\); warmup 20 & drop 0.05; drop path 0.1; cutmix 0.5; color jitter \\
+    CIFAR-100 & 2D; patch \(2 \times 2\); window \(4 \times 4\); embed 96; depths \([2,2,18,2]\) & batch 128; lr \(2.047168 \times 10^{-4}\); wd \(2.672492 \times 10^{-2}\); warmup 30 & drop path 0.3; mixup 0.2; cutmix 0.5; cutout 16 \\
+    ModelNet40 & 3D; patch \(2 \times 2 \times 2\); window \(4 \times 4 \times 4\); embed 72; depths \([2,2,6,2]\) & batch 64; lr \(1.262274 \times 10^{-3}\); wd \(7.049835 \times 10^{-3}\); warmup 3 & drop path 0.1 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Hyperparameter search is performed through configuration-driven random search. The preserved CIFAR-10 sweep evaluated 48 trials with validation accuracy as the selection metric and a 60-epoch budget per trial; trials 3 and 33 tied at the best validation accuracy, and the preserved auto-best configuration uses the first tied trial. The fixed CIFAR-100 sweep evaluated 24 trials with a 50-epoch budget per trial. The ModelNet40 sweep evaluated 15 successful trials with a 10-epoch budget per trial. The sweep plots below show the selected trial for each workload.
 
 \begin{figure}[t]
   \centering
   \input{figures/cifar10_sweep_plot}
-  \caption{Validation accuracy across the 48 preserved CIFAR-10 sweep trials. The highlighted star marks trial 3, which reached 0.7344 under the 60-epoch sweep budget. The later fixed retraining run using this selected configuration substantially improved the final checkpoint.}
+  \caption{Validation accuracy across the 48 preserved CIFAR-10 sweep trials. The highlighted star marks trial 3, one of two tied best trials at 0.7344 under the 60-epoch sweep budget. The later repaired retraining run used this selected artifact as its base but lowered drop-path regularization.}
   \label{fig:cifar10-sweep}
 \end{figure}
 
@@ -30,10 +55,12 @@ Hyperparameter search is performed through configuration-driven random search. T
 \begin{figure}[t]
   \centering
   \input{figures/modelnet40_sweep_plot}
-  \caption{Validation accuracy across the 15 ModelNet40 sweep trials in the resumed stable run. The highlighted star marks trial 11, which reached 0.8061, and the absence of failed trials confirms that the stabilized sweep space removed the earlier invalid warmup combinations.}
+  \caption{Validation accuracy across the 15 successful ModelNet40 sweep trials in the resumed stable run. The highlighted star marks trial 11, which reached 0.8061 under the 10-epoch sweep budget.}
   \label{fig:modelnet-sweep}
 \end{figure}
 
-After sweep selection, each task is retrained with the selected configuration. The CIFAR-10 retraining run was launched with a 600-epoch budget and stopped at epoch 392, restoring the best validation checkpoint from epoch 352. CIFAR-100 was also launched with a 600-epoch budget and stopped at epoch 350, restoring epoch 300. ModelNet40 was launched with a 200-epoch budget and stopped at epoch 27, restoring epoch 7. The restored best state, not the nominal epoch budget, determines the final reported checkpoint.
+\clearpage
 
-The experiments were executed through the repository's CLI, sweep, queue, and tmux-backed workflow mechanisms, which are themselves part of the practical contribution. The committed extraction inputs and the published Hugging Face weight repositories are listed in \autoref{app:artifacts}.
+After sweep selection, each task is converted into the final retraining configuration summarized in \autoref{tab:retrain-configs}. CIFAR-100 preserves the selected drop-path setting, while CIFAR-10 and ModelNet40 use the selected artifacts as bases and lower \texttt{drop\_path\_rate} for the long retraining runs. The restored best state, not the nominal epoch budget, determines the final reported checkpoint. \autoref{tab:experiment-ledger} makes this explicit because the wall-clock time and restored epoch are part of the reproducibility evidence, not just implementation details.
+
+The experiments were executed through the repository's CLI, sweep, queue, and tmux-backed workflow mechanisms, which are themselves part of the practical contribution. The high-level command form for the final sweep-plus-retrain jobs is \texttt{make auto-sweep-tmux SWEEP=configs/sweeps/<sweep>.yaml TRAIN\_EPOCHS=<epochs>}; the detached queue wrapper uses \texttt{make benchmark-tmux} for the committed 2D-to-3D benchmark queue. The committed extraction inputs and the published Hugging Face weight repositories are listed in \autoref{app:artifacts}.

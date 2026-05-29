@@ -6,6 +6,7 @@
 #
 # Job types:
 #   auto-sweep  — sweep hyperparameters, then train with the best config
+#   fetch-data  — export or cache a dataset before training
 #   sweep       — sweep hyperparameters only (no final training)
 #   train       — train with a fixed config
 #

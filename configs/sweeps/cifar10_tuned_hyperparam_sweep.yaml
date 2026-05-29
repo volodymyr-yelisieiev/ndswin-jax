@@ -1,5 +1,5 @@
 trials: 48
-trialsmethod: random
+method: random
 metric: val_accuracy
 budget_epochs: 60
 max_steps_per_epoch: 400

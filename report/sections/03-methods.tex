@@ -15,17 +15,15 @@ The project extends beyond the model definition into the training system. The re
 
 \begin{table}[t]
   \centering
-  \caption{Execution environment extracted from the preserved artifact set. The software versions are grounded in \texttt{pyproject.toml}; the runtime device selection is confirmed by the saved training logs.}
+  \caption{Execution environment information preserved for the reported runs. The software constraints are grounded in \texttt{pyproject.toml}; runtime device selection is confirmed by the saved training logs. Host CPU and RAM inventory was not captured in the committed artifacts.}
   \label{tab:environment}
   \begin{tabularx}{\linewidth}{@{}lY@{}}
     \toprule
     \textbf{Item} & \textbf{Value} \\
     \midrule
-    CPU & Intel Xeon E5-2630 v4, 20 logical CPUs \\
-    GPU inventory & 4 \(\times\) NVIDIA GeForce GTX 1080 Ti, 11264 MiB each \\
-    RAM & 125 GiB system memory \\
-    Runtime device selection & Automatic GPU selection through the CLI; preserved CIFAR-100 and ModelNet40 auto-sweep logs record all four GPUs selected \\
-    Core software & JAX 0.7.1, jaxlib 0.7.1, Flax, Optax, Orbax checkpointing \\
+    Hardware evidenced by logs & Four CUDA devices selected for the preserved CIFAR-100 and ModelNet40 final runs: GPU IDs \([1,2,3,0]\) \\
+    Runtime device policy & Automatic GPU selection through the CLI with minimum free memory, maximum used memory, and maximum utilization thresholds \\
+    Core software constraints & JAX 0.7.1, jaxlib 0.7.1; Flax, Optax, and Orbax checkpointing resolved from the project environment constraints \\
     \bottomrule
   \end{tabularx}
 \end{table}
