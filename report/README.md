@@ -40,14 +40,20 @@ pinned publishable artifact set, run:
 python extract_report_data.py --sync --sync-latest
 ```
 
-To create a locally ignored copy with the official Practical Work upload naming
-convention:
+The repository tracks the freshly built report PDF under the official Practical
+Work upload naming convention:
+
+```text
+report/26SS-K12340334-Yelisieiev_Volodymyr-Practical_Work_Report_BSc-v1-NDSwin_JAX.pdf
+```
+
+To also create a locally ignored copy under `report/dist/` for upload staging:
 
 ```bash
 make -C report submission
 ```
 
-This writes
+This writes the same PDF content to
 `report/dist/26SS-K12340334-Yelisieiev_Volodymyr-Practical_Work_Report_BSc-v1-NDSwin_JAX.pdf`.
 
 The PDF build runs:

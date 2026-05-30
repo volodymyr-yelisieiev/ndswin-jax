@@ -276,8 +276,9 @@ make train CONFIG=configs/my_custom_task.json
 # Fetch any HF dataset to local storage
 make fetch-data HF_DATASET=username/custom_dataset DATASET_DIR=data/custom_dataset
 
-# Clean up outputs and logs
-make clean-all
+# Back up, then clean generated run outputs and logs
+make backup
+make clean-runs FORCE=1
 ```
 
 ## Project Structure

@@ -12,4 +12,5 @@
 *.toc
 *-blx.bib
 missfont.log
+main-report.pdf
 dist/
