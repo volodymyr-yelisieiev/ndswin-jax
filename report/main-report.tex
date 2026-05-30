@@ -116,14 +116,15 @@ Public repository:\texorpdfstring{\\}{ - }%
 \printbibliography
 
 \appendix
-\section{Committed Artifact Copies}
+\section{Committed Report Evidence Bundle}
 \label{app:artifacts}
-The public code for this project is available at \url{https://github.com/volodymyr-yelisieiev/ndswin-jax}. The quantitative evidence in this report is tied to committed experiment-artifact copies under \path{report/data/sources/}. The derived plot tables in \path{report/data/*.csv} are regenerated from those local copies by \path{report/extract_report_data.py}. The restored-best checkpoints were also packaged as Hugging Face model repositories so the final weights can be inspected independently of the local training machine.
+The public code for this project is available at \url{https://github.com/volodymyr-yelisieiev/ndswin-jax}. The quantitative evidence in this report is tied to the committed report evidence bundle under \path{report/data/sources/}. The derived plot tables in \path{report/data/*.csv} are regenerated from those local copies by \path{report/extract_report_data.py}. The restored-best checkpoints were also packaged as Hugging Face model repositories so the final weights can be inspected independently of the local training machine.
 
-The figures and tables in this report are derived from the following committed artifact copies, relative to \path{report/data/sources/}. Final metric files contain the effective training configurations used for the reported checkpoints. The sweep-selected config files are included as traceability artifacts, but some full retraining runs intentionally changed runtime fields such as epoch budget after sweep selection. The table also lists the external Hugging Face repositories that host the exported final weights.
+The figures and tables in this report are derived from the following committed bundle entries. Path entries in the table are relative to \path{report/data/sources/}: for example, \path{logs/...} denotes the committed copy under \path{report/data/sources/logs/...}, not a live root-level \path{logs/} directory from the training server. The repository's root-level runtime directories such as \path{logs/}, \path{outputs/}, \path{data/}, and \path{configs/auto_best/} are intentionally ignored by Git and are not required to build or audit this report. Final metric files contain the effective training configurations used for the reported checkpoints. The sweep-selected config files are included as traceability artifacts, but some full retraining runs intentionally changed runtime fields such as epoch budget after sweep selection. The table also lists the external Hugging Face repositories that host the exported final weights.
 
 \small
 \begin{tabularx}{\linewidth}{@{}lY@{}}
+  \textbf{Resource} & \textbf{Bundle-relative path or external repository} \\
   \textbf{Sweep summaries} & \path{outputs/sweeps/cifar10_tuned_hyperparam_sweep/summary.json} \\
    & \path{outputs/sweeps/cifar100_tuned_hyperparam_sweep_fixed_20260519/summary.json} \\
    & \path{outputs/sweeps/modelnet40_stable_hyperparam_sweep/summary.json} \\

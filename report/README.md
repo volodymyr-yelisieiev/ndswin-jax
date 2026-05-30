@@ -13,7 +13,7 @@ The report intentionally follows the official JKU technical report path with `te
 
 ## Build
 
-Regenerate the derived CSV files from the committed artifact bundle under
+Regenerate the derived CSV files from the committed report evidence bundle under
 `report/data/sources/`:
 
 ```bash
@@ -70,7 +70,8 @@ make -C report clean
 ## Notes
 
 - The report uses vendored JKU template assets from `michaelroland/jku-templates-report-latex` release `v2.2`.
-- The content is grounded in the committed repository state and the pinned artifact copies under `report/data/sources/`.
-- Raw experiment artifacts used by the report are committed under `report/data/sources/`.
+- The content is grounded in the committed repository state and the pinned report evidence bundle under `report/data/sources/`.
+- Raw experiment artifacts used by the report are committed under `report/data/sources/`; paths such as `logs/...` and `outputs/...` in the appendix are relative to that bundle.
+- Root-level runtime directories such as `logs/`, `outputs/`, `data/`, and `configs/auto_best/` are intentionally Git-ignored and are not required to build or audit the report.
 - Vector figures are rendered from committed CSV data under `report/data/`, regenerated from those vendored raw artifacts.
 - Third-party report assets are summarized in `THIRD_PARTY.md`.
