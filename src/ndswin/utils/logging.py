@@ -108,8 +108,12 @@ def setup_logging(
     root_logger = logging.getLogger()
     root_logger.setLevel(_log_config.level.value)
 
-    # Remove existing handlers
-    root_logger.handlers.clear()
+    # Remove existing handlers, closing file handlers so repeated setup calls
+    # do not leave log files open.
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
 
     # Add console handler
     if _log_config.log_to_console:

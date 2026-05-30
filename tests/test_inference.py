@@ -29,7 +29,9 @@ class DummyModel(nn.Module):
         return (3, 32, 32)
 
     @nn.compact
-    def __call__(self, x, deterministic=True, training=False, return_features=False):
+    def __call__(self, x, deterministic=True, return_features=False):
+        if not deterministic:
+            raise ValueError("Inference tests expect deterministic model calls")
         batch_size = x.shape[0] if x.ndim > 0 else 1
 
         if self.task == "classification":

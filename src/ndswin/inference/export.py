@@ -97,7 +97,7 @@ def export_to_onnx(
         variables = {"params": params}
         if batch_stats is not None:
             variables["batch_stats"] = batch_stats
-        return cast(Array, model.apply(variables, x, training=False))
+        return cast(Array, model.apply(variables, x, deterministic=True))
 
     # Create dummy input
     dummy_input = jnp.zeros(input_shape)
@@ -159,7 +159,7 @@ def export_to_saved_model(
         variables = {"params": params}
         if batch_stats is not None:
             variables["batch_stats"] = batch_stats
-        return cast(Array, model.apply(variables, x, training=False))
+        return cast(Array, model.apply(variables, x, deterministic=True))
 
     # Convert to TF function
     tf_fn = jax2tf.convert(

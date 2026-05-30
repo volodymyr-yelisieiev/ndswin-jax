@@ -22,7 +22,9 @@ from ndswin.inference.export import (
 
 class DummyModel(nn.Module):
     @nn.compact
-    def __call__(self, x, training=False):
+    def __call__(self, x, deterministic=True):
+        if not deterministic:
+            raise ValueError("Deployment tests expect deterministic inference")
         return x * 2.0
 
 
@@ -34,6 +36,11 @@ def dummy_model():
 @pytest.fixture
 def dummy_params():
     return {"dense": {"kernel": jnp.ones((2, 2))}}
+
+
+@pytest.fixture
+def empty_params():
+    return {}
 
 
 def test_export_to_numpy(dummy_model, dummy_params):
@@ -63,19 +70,27 @@ def test_export_to_numpy(dummy_model, dummy_params):
         assert jnp.allclose(loaded_params["dense"]["kernel"], dummy_params["dense"]["kernel"])
 
 
-def test_export_to_onnx(dummy_model, dummy_params):
+def test_export_to_onnx(dummy_model, empty_params):
     """Test ONNX export with mocks."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         output_path = os.path.join(tmp_dir, "model.onnx")
 
         # Ensure we mock the module regardless of install state
         with patch.dict(sys.modules, {"jax2onnx": MagicMock(), "onnx": MagicMock()}):
-            sys.modules["jax2onnx"].to_onnx.return_value = MagicMock()
+            onnx_model = MagicMock()
+
+            def to_onnx(forward_fn, inputs, opset_version):
+                output = forward_fn(inputs[0])
+                assert jnp.allclose(output, inputs[0] * 2.0)
+                assert opset_version == 14
+                return onnx_model
+
+            sys.modules["jax2onnx"].to_onnx.side_effect = to_onnx
 
             try:
                 path = export_to_onnx(
                     model=dummy_model,
-                    params=dummy_params,
+                    params=empty_params,
                     output_path=output_path,
                     input_shape=(1, 3, 32, 32),
                 )
@@ -103,7 +118,7 @@ def test_export_to_onnx_missing_deps(dummy_model, dummy_params):
         )
 
 
-def test_export_to_saved_model(dummy_model, dummy_params):
+def test_export_to_saved_model(dummy_model, empty_params):
     """Test SavedModel export with mocks."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Mock sys modules for tf
@@ -123,10 +138,12 @@ def test_export_to_saved_model(dummy_model, dummy_params):
                 from jax.experimental import jax2tf
 
                 tf.Module = MagicMock
+                tf.function.side_effect = lambda *_, **__: lambda fn: fn
+                jax2tf.convert.side_effect = lambda forward_fn, **_: lambda x: forward_fn(x)
 
                 path = export_to_saved_model(
                     model=dummy_model,
-                    params=dummy_params,
+                    params=empty_params,
                     output_dir=tmp_dir,
                     input_shape=(1, 3, 32, 32),
                 )

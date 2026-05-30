@@ -4,6 +4,8 @@ import os
 import subprocess
 import unittest.mock as mock
 
+import pytest
+
 from ndswin.utils.gpu import get_available_gpus, setup_optimal_gpus
 
 
@@ -44,7 +46,8 @@ def test_get_available_gpus_no_smi(_mock_which):
 @mock.patch("subprocess.check_output")
 def test_get_available_gpus_command_error(mock_check_output, _mock_which):
     mock_check_output.side_effect = subprocess.CalledProcessError(1, "nvidia-smi")
-    assert get_available_gpus() == []
+    with pytest.warns(UserWarning, match="Failed to query nvidia-smi"):
+        assert get_available_gpus() == []
 
 
 @mock.patch("ndswin.utils.gpu.shutil.which", return_value="/usr/bin/nvidia-smi")

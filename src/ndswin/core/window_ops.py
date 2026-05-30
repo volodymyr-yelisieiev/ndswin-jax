@@ -252,56 +252,28 @@ def create_attention_mask(
         # No shift - all positions can attend to each other
         return jnp.ones((num_windows, window_area, window_area), dtype=jnp.bool_)
 
-    # Create window indices
-    # Each position gets an ID based on which original window it belongs to
-    # after the shift
-
-    # Start with zeros
+    # Assign each position the ID of its non-shifted source window, then
+    # shift the ID map exactly like ShiftedWindowAttention shifts features.
     window_ids = jnp.zeros(spatial_shape, dtype=jnp.int32)
-
-    # For each dimension, mark regions that wrap around due to shift
-    id_increment = 1
-
-    # We need to track which "slice" each position belongs to
-    # A slice is defined by whether it wraps around in each dimension
-
-    for dim in range(num_dims):
-        s = shift_size[dim]
-        if s == 0:
-            continue
-
-        size = spatial_shape[dim]
-        # Create indices for this dimension
-        indices = jnp.arange(size)
-
-        # Positions that wrap around vs those that don't
-        # After shift of s, positions [0, s) wrap to the end
-        # and positions [s, size) stay in order
-        wrap_mask = indices < s
-
-        # Create slice for broadcasting
+    stride = 1
+    for dim in range(num_dims - 1, -1, -1):
         shape = [1] * num_dims
-        shape[dim] = size
-        wrap_mask = wrap_mask.reshape(shape)
+        shape[dim] = spatial_shape[dim]
+        dim_window_ids = (jnp.arange(spatial_shape[dim]) // window_size[dim]).reshape(shape)
+        window_ids = window_ids + dim_window_ids.astype(jnp.int32) * stride
+        stride *= grid_shape[dim]
 
-        # Add to window IDs
-        window_ids = window_ids + wrap_mask.astype(jnp.int32) * id_increment
-        id_increment *= 2
-
-    # Now partition window_ids the same way we partition the data
-    # After shift
-    window_ids_shifted = cyclic_shift(window_ids[None, ..., None].astype(jnp.float32), shift_size)[
-        0, ..., 0
-    ].astype(jnp.int32)
+    window_ids_shifted = cyclic_shift(
+        window_ids[None, ..., None],
+        tuple(-s for s in shift_size),
+    )[0, ..., 0]
 
     # Add channel dimension for partitioning
     window_ids_expanded = window_ids_shifted[..., None]
 
     # Partition into windows
     # Need to match the partition_windows function signature
-    windows = partition_windows(
-        window_ids_expanded[None].astype(jnp.float32), window_size
-    )  # (num_windows, *window_size, 1)
+    windows = partition_windows(window_ids_expanded[None], window_size)
 
     # Flatten window dimensions
     windows = windows.reshape(num_windows, window_area)  # (num_windows, window_area)

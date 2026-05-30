@@ -7,12 +7,16 @@
 ![Flax](https://img.shields.io/badge/Flax-0.10%2B-8A2BE2)
 ![Conda](https://img.shields.io/badge/environment-conda-44A833)
 
-A pure JAX/Flax implementation of the Swin Transformer, generalized to support **N-dimensional data** (2D images, 3D volumes, 4D spatio-temporal) within a single, unified codebase.
+A pure JAX/Flax implementation of the Swin Transformer with dimension-aware
+modeling, data, sweep, and queue workflows. The preserved Practical Work
+artifacts validate the codebase on 2D image classification and 3D voxel
+classification; higher-dimensional configurations are supported by the core
+abstractions but were not benchmarked in those submitted results.
 
 ## Features
 
-- **N-Dimensional**: Train on 2D images, 3D voxels, or higher-dimensional data with no code changes — just configure `num_dims`.
-- **Bring Your Own Data**: Easily plug in ANY custom dataset of any dimension, either from the **Hugging Face Hub** or a **local directory**.
+- **N-Dimensional Core**: Configure `model.num_dims` for dimension-aware patching, windows, attention, and model stages; preserved benchmarks cover 2D images and 3D voxels.
+- **Bring Your Own Data**: Use compatible Hugging Face datasets or local N-D NumPy/NPZ folder layouts, subject to the documented loader contracts.
 - **Autonomous Optimization Pipeline**: Run `ndswin auto-sweep` directly, or use `make optimize` as a thin shortcut.
 - **Multi-GPU Data Parallelism**: Automatically uses all available GPUs with JAX mesh sharding.
 - **Hyperparameter Sweeps**: Built-in random search with early stopping, auto-training of best config.
@@ -30,6 +34,11 @@ The final restored-best checkpoints from the preserved practical-work artifact s
 | ModelNet40 voxels | 74.21% | 69.65% | 91.49% | [ndswin-modelnet40-final](https://huggingface.co/volodymyr-yelisieiev/ndswin-modelnet40-final) |
 
 All checkpoints were selected by validation accuracy. Test metrics were recomputed afterward from the restored checkpoint and are included in each model repository as `test_metrics.json`.
+
+These metrics and checkpoints are historical results from the submitted
+Practical Work artifact set. Since submission, the public code has received a
+shifted-window attention mask correctness fix; reproducing metrics with the
+current implementation requires rerunning the training workloads.
 
 ## Practical Work Reproduction
 
@@ -76,6 +85,19 @@ make validate CONDA_PREFIX_DIR=/absolute/path/to/your/env
 `make env` creates or updates `Environment/ndswin-jax`. If Conda/Mamba is unavailable, it bootstraps a local Miniforge under `.tools/` and installs the project with `dev`, `training`, and `gpu` extras. The GPU extra uses the current JAX CUDA 12 install style (`jax[cuda12]`), which supports the GTX 1080 Ti generation used for the preserved benchmark hardware.
 
 The Makefile resolves `python`, `pip`, `pytest`, `ruff`, `mypy`, and `sphinx-build` from `Environment/ndswin-jax/bin` first, then falls back to the active shell `PATH` when that prefix is absent.
+
+For CPU-only development in an already-managed Python 3.11+ environment, use
+the editable install without GPU extras:
+
+```bash
+python -m pip install -e ".[dev,training]"
+```
+
+CUDA 12 users who do not use `make env` can opt into the GPU extra explicitly:
+
+```bash
+python -m pip install -e ".[dev,training,gpu]"
+```
 
 ### 2. High-Level Optimization Shortcut
 

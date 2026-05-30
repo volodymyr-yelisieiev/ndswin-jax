@@ -379,7 +379,7 @@ class FeatureExtractor(Predictor):
             return self.model.apply(
                 variables,
                 x,
-                training=False,
+                deterministic=True,
                 return_features=self.return_features,
             )
 

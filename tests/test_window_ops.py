@@ -1,5 +1,8 @@
 """Tests for window operations."""
 
+from functools import reduce
+from operator import mul
+
 import jax
 import jax.numpy as jnp
 
@@ -10,6 +13,34 @@ from ndswin.core.window_ops import (
     partition_windows,
     reverse_partition_windows,
 )
+
+
+def _expected_shifted_attention_mask(
+    spatial_shape: tuple[int, ...],
+    window_size: tuple[int, ...],
+    shift_size: tuple[int, ...],
+) -> jnp.ndarray:
+    """Build the shifted mask from explicit source-window membership."""
+    grid_shape = tuple(s // w for s, w in zip(spatial_shape, window_size))
+    coords = jnp.indices(spatial_shape)
+    original_window_ids = jnp.zeros(spatial_shape, dtype=jnp.int32)
+
+    stride = 1
+    for dim in range(len(spatial_shape) - 1, -1, -1):
+        original_window_ids = (
+            original_window_ids + (coords[dim] // window_size[dim]).astype(jnp.int32) * stride
+        )
+        stride *= grid_shape[dim]
+
+    shifted_ids = cyclic_shift(
+        original_window_ids[None, ..., None],
+        tuple(-s for s in shift_size),
+    )
+    shifted_windows = partition_windows(shifted_ids, window_size)
+    window_area = reduce(mul, window_size, 1)
+    shifted_windows = shifted_windows.reshape(-1, window_area)
+
+    return shifted_windows[:, :, None] == shifted_windows[:, None, :]
 
 
 class TestPartitionWindows:
@@ -127,6 +158,30 @@ class TestAttentionMask:
 
         # With no shift, mask should be all True (allow attention everywhere)
         assert jnp.all(mask)
+
+    def test_shifted_2d_mask_matches_original_window_groups(self):
+        """Shifted windows should only attend within their source windows."""
+        spatial_shape = (8, 8)
+        window_size = (4, 4)
+        shift_size = (2, 2)
+
+        mask = create_attention_mask(spatial_shape, window_size, shift_size)
+        expected = _expected_shifted_attention_mask(spatial_shape, window_size, shift_size)
+
+        assert jnp.array_equal(mask, expected)
+        assert [int(x) for x in mask.sum(axis=(1, 2))] == [64, 64, 64, 64]
+
+    def test_shifted_3d_mask_matches_original_window_groups(self):
+        """3D shifted masks should generalize the same source-window rule."""
+        spatial_shape = (4, 4, 4)
+        window_size = (2, 2, 2)
+        shift_size = (1, 1, 1)
+
+        mask = create_attention_mask(spatial_shape, window_size, shift_size)
+        expected = _expected_shifted_attention_mask(spatial_shape, window_size, shift_size)
+
+        assert jnp.array_equal(mask, expected)
+        assert [int(x) for x in mask.sum(axis=(1, 2))] == [8] * 8
 
 
 class TestPadForWindow:

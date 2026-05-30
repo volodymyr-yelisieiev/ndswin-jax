@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lightweight:
+    name: Lightweight Checks
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}/src
+      HF_HOME: .hf_cache
+      HF_DATASETS_CACHE: .hf_cache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,training]"
+
+      - name: Ruff check
+        run: python -m ruff check src/ndswin tests train
+
+      - name: Ruff format check
+        run: python -m ruff format --check src/ndswin tests train
+
+      - name: Mypy
+        run: python -m mypy src/ndswin --ignore-missing-imports
+
+      - name: Focused tests
+        run: >
+          python -m pytest
+          tests/test_window_ops.py
+          tests/test_config.py
+          tests/test_deployment.py
+          tests/test_inference.py
+          tests/test_data_loaders.py
+          -v

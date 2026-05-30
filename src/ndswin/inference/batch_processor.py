@@ -312,7 +312,7 @@ class ParallelProcessor:
                     self.predictor.model.apply(
                         {"params": params, "batch_stats": batch_stats},
                         x,
-                        training=False,
+                        deterministic=True,
                     ),
                 )
             else:
@@ -321,7 +321,7 @@ class ParallelProcessor:
                     self.predictor.model.apply(
                         {"params": params},
                         x,
-                        training=False,
+                        deterministic=True,
                     ),
                 )
 
